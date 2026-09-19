@@ -1,0 +1,6 @@
+{
+  "name": "在线客服系统与工作台",
+  "description": "企业级在线客服系统：包含访客聊天页、客服工作台、超管与企业主双角色运营控制台(/admin)、WebSocket事件总线与网站嵌入组件 widget.js",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

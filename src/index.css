@@ -1,0 +1,43 @@
+@import "tailwindcss";
+
+html,
+body,
+#root {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+/* Crisp-like sleek scrollbar for message stream */
+.crisp-scrollbar::-webkit-scrollbar {
+  width: 5px;
+}
+.crisp-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.crisp-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.4);
+  border-radius: 9999px;
+}
+.crisp-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.7);
+}
+
+/* WeChat voice wave animations */
+@keyframes wechatWave1 {
+  0%, 100% { opacity: 0.2; }
+  15%, 85% { opacity: 1; }
+}
+@keyframes wechatWave2 {
+  0%, 25%, 100% { opacity: 0.2; }
+  45%, 85% { opacity: 1; }
+}
+@keyframes wechatWave3 {
+  0%, 50%, 100% { opacity: 0.2; }
+  70%, 95% { opacity: 1; }
+}
+.wechat-arc-1 { animation: wechatWave1 1.2s infinite ease-in-out; }
+.wechat-arc-2 { animation: wechatWave2 1.2s infinite ease-in-out; }
+.wechat-arc-3 { animation: wechatWave3 1.2s infinite ease-in-out; }
