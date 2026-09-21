@@ -2,15 +2,17 @@
 #
 # 触发方式：推送形如 v0.1.0 的 tag
 #   git tag v0.1.0 && git push origin v0.1.0
-# 产物：Windows x64 NSIS 安装包(.exe)、macOS Intel/Apple芯片 两个 .dmg
-#       自动挂到该 tag 对应的 GitHub Release 资产中
+# 产物：Windows x64 NSIS 安装包(.exe)，自动挂到该 tag 对应的 GitHub Release 资产中
+#
+# macOS dmg 改为本地构建（GitHub 免费 mac runner 排队过久）：
+#   在 Mac 上 git checkout <tag> && npm install && npm run dist:mac
+#   产物在 release/*.dmg，直接发给使用者或手动上传到 Release 附件
 #
 # 签名：当前未配置任何 Secrets，产出未签名包。
 # 以后配置签名时，只需在仓库 Settings → Secrets and variables → Actions 添加：
 #   Windows（云签名，如 Azure Trusted Signing）：AZURE_TENANT_ID / AZURE_CLIENT_ID /
 #            AZURE_CLIENT_SECRET / AZURE_CODE_SIGNING_ACCOUNT_NAME / AZURE_CODE_SIGNING_ENDPOINT
-#   macOS：  CSC_LINK / CSC_KEY_PASSWORD / APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID
-# 届时 electron-builder 会自动识别并签名/公证，无需改本文件。
+# 届时 electron-builder 会自动识别并签名，无需改本文件。
 
 name: Release Desktop (Electron)
 
@@ -61,65 +63,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: release/*.exe
-          generate_release_notes: true
-          fail_on_unmatched_files: true
-
-  build-macos:
-    name: Build macOS dmg
-    # 固定 macos-13（Intel + Xcode 14）：
-    # dmg-license 的原生依赖 iconv-corefoundation 1.1.7 是老版 node-gyp addon，
-    # 在 macos-14 的 Xcode 15 上编译失败会被 npm 当作 optional 依赖静默跳过，
-    # 导致 electron-builder 启动即报 Cannot find module 'dmg-license'。
-    # x64 runner 交叉打 arm64 dmg 完全支持（iconutil/hdiutil 架构无关）。
-    runs-on: macos-13
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      # lockfile 在 Linux 上生成，darwin 专属可选依赖可能被 npm ci 漏掉，缺失时补装
-      - name: Ensure dmg-license is installed
-        run: |
-          if [ ! -d node_modules/dmg-license ]; then
-            echo "dmg-license missing after npm ci, installing explicitly..."
-            npm install dmg-license@1.0.11 --no-save
-          else
-            echo "dmg-license present"
-          fi
-
-      - name: Build desktop bundle
-        run: npm run build:desktop
-
-      - name: Package macOS dmg (x64 + arm64)
-        # 未签名构建：显式关闭证书自动发现（GitHub runner keychain 自带其他证书，
-        # 自动探测可能选中无效身份导致 codesign 失败）。
-        # 全量日志写文件，结尾 100 行打到本步骤（短日志免登录可见，不会被截断）。
-        shell: bash
-        run: |
-          npx electron-builder --mac --x64 --arm64 > builder.log 2>&1
-          code=$?
-          echo "----- electron-builder output (tail 100) -----"
-          tail -100 builder.log
-          exit $code
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CSC_IDENTITY_AUTO_DISCOVERY: false
-          # —— 以下变量留空即出未签名包；配置 Secrets 后自动启用签名与公证 ——
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-
-      - name: Upload dmg to Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: release/*.dmg
           generate_release_notes: true
           fail_on_unmatched_files: true
