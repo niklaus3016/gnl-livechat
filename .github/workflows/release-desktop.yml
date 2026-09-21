@@ -42,7 +42,9 @@ jobs:
         run: npm run build:desktop
 
       - name: Package Windows installer
-        run: npx electron-builder --win --x64
+        run: |
+          set -o pipefail
+          npx electron-builder --win --x64 2>&1 | tail -150
 
       - name: Upload installer to Release
         uses: softprops/action-gh-release@v2
@@ -69,9 +71,15 @@ jobs:
         run: npm run build:desktop
 
       - name: Package macOS dmg (x64 + arm64)
-        run: npx electron-builder --mac --x64 --arm64
+        # 未签名构建：显式关闭证书自动发现（GitHub runner keychain 自带其他证书，
+        # 自动探测可能选中无效身份导致 codesign 失败）。
+        # pipefail + tail：收敛日志，保证失败时结尾报错在网页端直接可见（不被截断）。
+        run: |
+          set -o pipefail
+          npx electron-builder --mac --x64 --arm64 2>&1 | tail -150
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: false
           # —— 以下变量留空即出未签名包；配置 Secrets 后自动启用签名与公证 ——
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
