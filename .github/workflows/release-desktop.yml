@@ -1,0 +1,87 @@
+# 桌面客户端（Electron）发布流水线
+#
+# 触发方式：推送形如 v0.1.0 的 tag
+#   git tag v0.1.0 && git push origin v0.1.0
+# 产物：Windows x64 NSIS 安装包(.exe)、macOS Intel/Apple芯片 两个 .dmg
+#       自动挂到该 tag 对应的 GitHub Release 资产中
+#
+# 签名：当前未配置任何 Secrets，产出未签名包。
+# 以后配置签名时，只需在仓库 Settings → Secrets and variables → Actions 添加：
+#   Windows（云签名，如 Azure Trusted Signing）：AZURE_TENANT_ID / AZURE_CLIENT_ID /
+#            AZURE_CLIENT_SECRET / AZURE_CODE_SIGNING_ACCOUNT_NAME / AZURE_CODE_SIGNING_ENDPOINT
+#   macOS：  CSC_LINK / CSC_KEY_PASSWORD / APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID
+# 届时 electron-builder 会自动识别并签名/公证，无需改本文件。
+
+name: Release Desktop (Electron)
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build Windows exe
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build desktop bundle
+        run: npm run build:desktop
+
+      - name: Package Windows installer
+        run: npx electron-builder --win --x64
+
+      - name: Upload installer to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*.exe
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+
+  build-macos:
+    name: Build macOS dmg
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build desktop bundle
+        run: npm run build:desktop
+
+      - name: Package macOS dmg (x64 + arm64)
+        run: npx electron-builder --mac --x64 --arm64
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # —— 以下变量留空即出未签名包；配置 Secrets 后自动启用签名与公证 ——
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Upload dmg to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*.dmg
+          generate_release_notes: true
+          fail_on_unmatched_files: true

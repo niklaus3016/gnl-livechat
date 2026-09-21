@@ -3,9 +3,17 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import {defineConfig} from 'vite';
 
-export default defineConfig(() => {
+export default defineConfig(({ mode }) => {
+  // 桌面客户端（Electron）构建：
+  // - base './'：file:// 协议加载本地文件，必须用相对路径，否则白屏
+  // - outDir dist-desktop：与网页版 dist 隔离，互不覆盖
+  const isDesktop = mode === 'desktop';
   return {
-    plugins: [react(), tailwindcss()],
+  base: isDesktop ? './' : '/',
+  plugins: [react(), tailwindcss()],
+  build: {
+    outDir: isDesktop ? 'dist-desktop' : 'dist',
+  },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

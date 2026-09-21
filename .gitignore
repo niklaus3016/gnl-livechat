@@ -5,7 +5,11 @@ node_modules/
 
 # Build output
 dist/
-build/
+dist-desktop/
+release/
+# electron-builder 资源目录，只入库应用图标
+/build/*
+!/build/icon.png
 *.tsbuildinfo
 tsconfig.tsbuildinfo
 
