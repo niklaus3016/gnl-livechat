@@ -84,21 +84,14 @@ jobs:
       - name: Package macOS dmg (x64 + arm64)
         # 未签名构建：显式关闭证书自动发现（GitHub runner keychain 自带其他证书，
         # 自动探测可能选中无效身份导致 codesign 失败）。
-        # 失败时把最后 100 行写入 Step Summary（run 详情页顶部公开可见，免登录排查）。
+        # 全量日志写文件，结尾 100 行打到本步骤（短日志免登录可见，不会被截断）。
         shell: bash
         run: |
-          set +e
           npx electron-builder --mac --x64 --arm64 > builder.log 2>&1
           code=$?
-          if [ $code -ne 0 ]; then
-            {
-              echo '## electron-builder (mac) failed'
-              echo '```'
-              tail -100 builder.log
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-            exit $code
-          fi
+          echo "----- electron-builder output (tail 100) -----"
+          tail -100 builder.log
+          exit $code
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: false
