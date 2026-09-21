@@ -33,8 +33,10 @@ import { AdminLoginPage } from './pages/admin/AdminLoginPage';
 /**
  * 坐席工作台路由集合 —— 网页版与桌面版共用。
  * 桌面版（Electron）只挂载这些路由，访客页/演示页/管理后台均不开放。
+ * 注意：必须是 JSX 常量而不是组件——<Routes> 的直接子节点只允许 <Route> 或
+ * <React.Fragment>，写成自定义组件会抛 "[x] is not a <Route> component" 并白屏。
  */
-const AgentRoutes: React.FC = () => (
+const AGENT_ROUTES = (
   <>
     {/* Agent Login */}
     <Route path="/agent/login" element={<LoginPage />} />
@@ -141,7 +143,7 @@ const DesktopApp: React.FC = () => (
   <HashRouter>
     <Routes>
       <Route path="/" element={<Navigate to="/agent/login" replace />} />
-      <AgentRoutes />
+      {AGENT_ROUTES}
       <Route path="*" element={<Navigate to="/agent/login" replace />} />
     </Routes>
   </HashRouter>
@@ -182,7 +184,7 @@ const WebApp: React.FC = () => (
       <Route path="/chat" element={<ChatPage />} />
 
       {/* Agent workbench */}
-      <AgentRoutes />
+      {AGENT_ROUTES}
 
       {/* Fallback */}
       <Route path="*" element={<Navigate to="/" replace />} />
