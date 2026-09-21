@@ -1,8 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { getCurrentAgentToken, updateAgentProfile, getAgentList, IS_MOCK, updateStoredAgentProfile, getTenantConfig } from '../../../api';
+import { getCurrentAgentToken, updateAgentProfile, getAgentList, IS_MOCK, updateStoredAgentProfile, getTenantSetting } from '../../../api';
 import { mockWsBus } from '../../../lib/mock/mock-ws-bus';
 import { realSocket } from '../../../lib/real/socket-service';
-import { TENANT_KEY } from '../../../api/http';
 import { AgentStatus, AgentUser, JwtTokenPayload } from '../../../types';
 import {
   UserCheck,
@@ -40,9 +39,8 @@ const AGENT_AVATAR_PRESETS = [
 export const ProfilePage: React.FC = () => {
   const [userToken, setUserToken] = useState<JwtTokenPayload | null>(getCurrentAgentToken());
   const [nickname, setNickname] = useState('');
-  const [avatar, setAvatar] = useState(
-    'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80'
-  );
+  // 默认兜底：本地通用女士头像（坐席未自定义头像时统一用它）
+  const [avatar, setAvatar] = useState('/avatars/agent-female.png');
   const [title, setTitle] = useState('在线技术支持');
   const [bio, setBio] = useState(
     '欢迎咨询，我们将竭诚为您解答产品、计费与系统对接相关疑问。'
@@ -55,8 +53,8 @@ export const ProfilePage: React.FC = () => {
   const avatarFileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    getTenantConfig(TENANT_KEY)
-      .then((c) => setTenantName(c.tenant_name || ''))
+    getTenantSetting()
+      .then((c) => setTenantName(c.brand_name || c.tenant_name || ''))
       .catch(() => undefined);
   }, []);
 
@@ -542,11 +540,11 @@ export const ProfilePage: React.FC = () => {
             </div>
 
             {/* Visitor-side message input (preview only) */}
-            <div className="rounded-2xl border border-slate-200 bg-white p-2.5 shadow-xs mt-[215px]">
+            <div className="rounded-2xl border border-slate-200 bg-white p-2.5 shadow-xs mt-53.75">
               <textarea
                 readOnly
                 placeholder="输入你的信息..."
-                className="w-full resize-none bg-transparent text-xs text-slate-400 placeholder:text-slate-300 outline-hidden px-1 py-1 min-h-[44px]"
+                className="w-full resize-none bg-transparent text-xs text-slate-400 placeholder:text-slate-300 outline-hidden min-h-11 px-1 py-1"
               />
               <div className="flex items-center justify-between pt-1">
                 <div className="flex items-center gap-3 text-slate-400">

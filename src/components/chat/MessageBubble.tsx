@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage } from '../../types';
 import { FileText, Download, Check, CheckCheck, Lock, Copy, Film, FileCode, FileArchive, FileSpreadsheet } from 'lucide-react';
 import { playVoiceSimulation } from '../../utils/audio';
+import { resolveAssetUrl } from '../../api/http';
 
 const WeChatWaveIcon: React.FC<{ isPlaying: boolean; className?: string }> = ({
   isPlaying,
@@ -284,6 +285,27 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   onActionClick,
   dark = false,
 }) => {
+  // 独立域名部署时把后端相对附件地址补全；同源部署原样不变
+  const fileUrl = resolveAssetUrl(message.fileUrl);
+  const videoUrl = resolveAssetUrl(message.videoUrl);
+  const [previewOpen, setPreviewOpen] = useState(false);
+
+  const openPreview = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const url = resolveAssetUrl(message.fileUrl) || message.fileUrl;
+    if (url) setPreviewOpen(true);
+  };
+  const previewUrl = resolveAssetUrl(message.fileUrl) || message.fileUrl || '';
+
+  useEffect(() => {
+    if (!previewOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPreviewOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [previewOpen]);
+
   // 1. System Notification Message
   if (message.senderType === 'system') {
     return (
@@ -327,10 +349,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     ? message.senderType === 'agent'
     : message.senderType === 'visitor';
 
-  // Crisp representative business male avatar (Leo / James)
-  const defaultAgentPhoto =
-    agentAvatar ||
-    'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80';
+  // 坐席头像兜底：统一用本地通用头像（不用外部人像图）
+  const defaultAgentPhoto = agentAvatar || '/avatars/agent-female.png';
 
   // Helper to extract voice duration
   const isVoice =
@@ -363,13 +383,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             duration={getVoiceDuration()}
             isMe={true}
             themeColor={themeColor}
-            audioUrl={message.fileUrl}
+            audioUrl={fileUrl}
           />
         </div>
       );
     }
 
     return (
+      <>
       <div className={`flex flex-col items-end ${showSenderInfo ? 'mb-2.5' : 'mb-1'}`}>
         <div
           className="relative inline-block w-fit max-w-[85%] rounded-xl px-3.5 py-2.5 text-[13.5px] leading-relaxed text-white shadow-2xs wrap-break-word select-text"
@@ -384,7 +405,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           {message.msgType === 'video' && (
             <div className="space-y-1 rounded-lg overflow-hidden bg-black/40 p-1">
               <video
-                src={message.videoUrl || message.fileUrl}
+                src={videoUrl || fileUrl}
                 controls
                 playsInline
                 className="rounded-lg max-h-60 w-full object-contain"
@@ -403,12 +424,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
           {/* Image content */}
           {message.msgType === 'image' && (
-            <div className="space-y-1">
+            <div className="space-y-1 cursor-pointer select-none" onMouseDown={openPreview}>
               <img
-                src={message.fileUrl || 'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=600&auto=format&fit=crop&q=80'}
+                src={fileUrl || 'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=600&auto=format&fit=crop&q=80'}
                 alt={message.fileName || '图片'}
-                className="rounded-xl max-h-60 object-cover cursor-pointer hover:opacity-95 transition"
-                onClick={() => message.fileUrl && window.open(message.fileUrl, '_blank')}
+                draggable={false}
+                className="rounded-xl max-h-60 object-cover pointer-events-none select-none hover:opacity-95 transition"
               />
               {message.content && message.content !== '[图片]' && (
                 <p className="text-xs pt-1">{message.content}</p>
@@ -427,7 +448,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 <p className="text-[10px] text-white/80">{message.fileSize || '未知大小'}</p>
               </div>
               <a
-                href={message.fileUrl || '#'}
+                href={fileUrl || '#'}
                 download={message.fileName}
                 target="_blank"
                 rel="noreferrer"
@@ -440,6 +461,31 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           )}
         </div>
       </div>
+      {previewOpen && previewUrl && (
+        <div
+          className="fixed inset-0 z-9999 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => setPreviewOpen(false)}
+        >
+          <button
+            type="button"
+            className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/15 hover:bg-white/25 text-white flex items-center justify-center transition cursor-pointer"
+            onClick={() => setPreviewOpen(false)}
+            aria-label="关闭预览"
+          >
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+          <img
+            src={previewUrl}
+            alt={message.fileName || '图片预览'}
+            className="max-w-[92vw] max-h-[88vh] object-contain rounded-lg shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
+      </>
     );
   }
 
@@ -449,17 +495,18 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     message.senderName?.includes('机器人') ||
     message.senderId?.includes('bot');
 
-  // 机器人头像（品牌无关的通用 AI 标识）
-  const WGETCLOUD_LOGO = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="48" fill="%232563eb"/><path d="M28 48 C28 32, 44 26, 50 38 L54 62 C60 74, 74 68, 74 52 C74 38, 66 32, 58 35" stroke="white" stroke-width="10" stroke-linecap="round" fill="none"/></svg>`;
+  // 机器人头像兜底：企业主配置的 brand_avatar，未配置时用系统默认 AI 头像（企业开通即有，正常不会到这层）
+  const botAvatarSrc = botAvatar || '/avatars/ai-default.png';
 
   return (
+    <>
     <div className={`flex items-start gap-2.5 ${showSenderInfo ? 'mb-2.5 mt-2' : 'mb-1'}`}>
       {/* Left Avatar (Hidden if continuous message from same sender) */}
       <div className="w-7.5 shrink-0">
         {showSenderInfo ? (
           isBot ? (
             <img
-              src={botAvatar || WGETCLOUD_LOGO}
+              src={botAvatarSrc}
               alt="光年跃迁 机器人"
               className="w-7.5 h-7.5 rounded-full object-cover shadow-xs border border-blue-200/50"
             />
@@ -496,7 +543,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
         {/* Message Bubble */}
         {isVoice ? (
-          <WeChatVoiceBubble duration={getVoiceDuration()} isMe={false} audioUrl={message.fileUrl} dark={dark} />
+          <WeChatVoiceBubble duration={getVoiceDuration()} isMe={false} audioUrl={fileUrl} dark={dark} />
         ) : (
           <div
             className={`inline-block w-fit max-w-full rounded-xl px-3.5 py-2.5 text-[13.5px] leading-relaxed shadow-2xs wrap-break-word select-text ${
@@ -512,7 +559,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             {message.msgType === 'video' && (
               <div className="space-y-1 rounded-lg overflow-hidden bg-black/90 p-1">
                 <video
-                  src={message.videoUrl || message.fileUrl}
+                  src={videoUrl || fileUrl}
                   controls
                   playsInline
                   className="rounded-lg max-h-60 w-full object-contain"
@@ -531,14 +578,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
             {/* Image content */}
             {message.msgType === 'image' && (
-              <div className="space-y-1">
+              <div className="space-y-1 cursor-pointer select-none" onMouseDown={openPreview}>
                 <img
-                  src={message.fileUrl || 'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=600&auto=format&fit=crop&q=80'}
+                  src={fileUrl || 'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=600&auto=format&fit=crop&q=80'}
                   alt={message.fileName || '图片'}
-                  className={`rounded-xl max-h-64 object-contain cursor-pointer hover:opacity-95 transition ${
+                  draggable={false}
+                  className={`rounded-xl max-h-64 object-contain pointer-events-none select-none hover:opacity-95 transition ${
                     dark ? 'bg-slate-900 border border-slate-700' : 'bg-white border border-slate-200/80'
                   }`}
-                  onClick={() => message.fileUrl && window.open(message.fileUrl, '_blank')}
                 />
                 {message.content && message.content !== '[图片]' && (
                   <p className={`text-xs pt-1 ${dark ? 'text-slate-300' : 'text-slate-600'}`}>{message.content}</p>
@@ -560,7 +607,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   <p className="text-[10px] text-slate-400">{message.fileSize || '未知大小'}</p>
                 </div>
                 <a
-                  href={message.fileUrl || '#'}
+                  href={fileUrl || '#'}
                   download={message.fileName}
                   target="_blank"
                   rel="noreferrer"
@@ -594,5 +641,30 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         )}
       </div>
     </div>
+    {previewOpen && previewUrl && (
+      <div
+        className="fixed inset-0 z-9999 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+        onClick={() => setPreviewOpen(false)}
+      >
+        <button
+          type="button"
+          className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/15 hover:bg-white/25 text-white flex items-center justify-center transition cursor-pointer"
+          onClick={() => setPreviewOpen(false)}
+          aria-label="关闭预览"
+        >
+          <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+        <img
+          src={previewUrl}
+          alt={message.fileName || '图片预览'}
+          className="max-w-[92vw] max-h-[88vh] object-contain rounded-lg shadow-2xl"
+          onClick={(e) => e.stopPropagation()}
+        />
+      </div>
+    )}
+    </>
   );
 };

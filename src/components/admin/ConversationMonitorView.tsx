@@ -10,7 +10,7 @@ import { VisitorInfoPanel } from '../agent/VisitorInfoPanel';
 const STATUS_META: Record<string, { label: string; cls: string }> = {
   open: { label: '进行中', cls: 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' },
   queued: { label: '排队中', cls: 'bg-amber-500/10 text-amber-400 border border-amber-500/30' },
-  closed: { label: '已结束', cls: 'bg-slate-500/10 text-slate-400 border border-slate-500/30' },
+  closed: { label: '已归档', cls: 'bg-slate-500/10 text-slate-400 border border-slate-500/30' },
 };
 
 /**
@@ -142,7 +142,7 @@ export const ConversationMonitorView: React.FC<{
                       </span>
                       <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-slate-800 text-slate-300 border border-slate-700 flex items-center gap-1 shrink-0">
                         <Globe className="w-3 h-3 text-blue-400" />
-                        Web官网咨询
+                        Web
                       </span>
                     </div>
                     <div className="text-[11px] text-slate-400 flex items-center gap-2 mt-0.5">

@@ -9,12 +9,12 @@ import {
   markVisitorMessagesRead,
   getAgentList,
   submitPrechatForm,
-  rateConversation,
 } from '../../api';
 import { IS_MOCK } from '../../api';
 import { MockApiService } from '../../lib/mock/mock-api';
 import { mockWsBus } from '../../lib/mock/mock-ws-bus';
 import { INITIAL_MESSAGES } from '../../lib/mock/mock-data';
+import { AI_DEFAULT_AVATAR } from '../../constants/avatars';
 import { ChatMessage, Conversation, MessageType, TenantConfig, AgentUser, AgentStatus } from '../../types';
 import { ChatHeader } from '../../components/chat/ChatHeader';
 import { MessageBubble } from '../../components/chat/MessageBubble';
@@ -51,8 +51,11 @@ const isVideoFile = (f: File) => f.type.startsWith('video/') || VIDEO_FILE_EXT_R
 
 export const ChatPage: React.FC = () => {
   const [searchParams] = useSearchParams();
-  const isEmbed = searchParams.get('embed') === '1';
-  const tenantCodeParam = searchParams.get('tenant_code') || 'wgetcloud_live';
+  // 嵌入态兼容两种 widget：旧版 widget.js 用 embed=1&tenant_code=xxx；
+  // 生产环境后端 LightChat loader 用 ?tenant=xxx（无 embed 参数）
+  const isEmbed = searchParams.get('embed') === '1' || searchParams.has('tenant');
+  const tenantCodeParam =
+    searchParams.get('tenant_code') || searchParams.get('tenant') || 'wgetcloud_live';
 
   // State
   const [tenantConfig, setTenantConfig] = useState<TenantConfig | null>(null);
@@ -81,11 +84,8 @@ export const ChatPage: React.FC = () => {
   const [isUploading, setIsUploading] = useState(false);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [showPreChat, setShowPreChat] = useState(false);
-  // Service rating (shown after conversation closed)
-  const [ratingScore, setRatingScore] = useState<number | null>(null);
-  const [ratingError, setRatingError] = useState('');
-  // Default to active working hours state for demo presentation, can be toggled via header menu
-  const [workStatusMode, setWorkStatusMode] = useState<'work' | 'offline' | 'auto'>('work');
+  // 固定为接待中状态（ChatHeader 仅展示工作状态，无切换入口）；保留联合类型以便未来接通切换
+  const workStatusMode = 'work' as 'work' | 'offline' | 'auto';
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [isHomeView, setIsHomeView] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -274,7 +274,14 @@ export const ChatPage: React.FC = () => {
   // Listen to host window events (such as popup open)
   useEffect(() => {
     const handleHostMessage = (e: MessageEvent) => {
-      if (e.data && (e.data.type === 'LIVECHAT_WIDGET_OPENED' || e.data.type === 'LIVECHAT_OPEN')) {
+      const t = e.data?.type;
+      // 兼容旧版 widget.js（LIVECHAT_*）与生产 LightChat loader（livechat:*）
+      if (
+        t === 'LIVECHAT_WIDGET_OPENED' ||
+        t === 'LIVECHAT_OPEN' ||
+        t === 'livechat:open' ||
+        t === 'livechat:toggle'
+      ) {
         setTimeout(() => scrollToBottom(false), 50);
         setTimeout(() => scrollToBottom(false), 200);
       }
@@ -301,6 +308,22 @@ export const ChatPage: React.FC = () => {
       setTenantConfig(config);
       setAgents(agentList);
 
+      // iframe 嵌入时，把企业配置（主题色/通用头像）同步给宿主页的悬浮球 widget.js
+      if (isEmbed) {
+        try {
+          const cfgMsg = {
+            themeColor: config.theme_color,
+            avatar: config.default_avatar,
+            brandName: config.brand_name || config.tenant_name,
+          };
+          window.parent?.postMessage({ type: 'livechat:config', ...cfgMsg }, '*');
+          // 旧版宿主页兼容
+          window.parent?.postMessage({ type: 'LIVECHAT_CONFIG', ...cfgMsg }, '*');
+        } catch {
+          // ignore
+        }
+      }
+
       // 进线自动弹窗：企业主在外观定制页配置开关与延迟秒数。
       // 同一浏览器会话内访客手动关闭过则不再弹（sessionStorage 记忆）。
       if (config.enable_auto_popup) {
@@ -317,7 +340,10 @@ export const ChatPage: React.FC = () => {
             // iframe 嵌入时容器显隐由宿主页控制（widget.js），到点通知宿主弹窗
             autoPopupTimerRef.current = window.setTimeout(() => {
               try {
+                // 旧版 widget.js / 演示宿主页
                 window.parent?.postMessage({ type: 'LIVECHAT_AUTO_OPEN' }, '*');
+                // 生产环境后端 LightChat loader
+                window.parent?.postMessage({ type: 'livechat:open' }, '*');
               } catch {
                 // ignore
               }
@@ -546,24 +572,6 @@ export const ChatPage: React.FC = () => {
     }, 2000);
   };
 
-  // Submit service rating (backend: POST /widget/session/rate)
-  const handleRateConversation = async (score: number) => {
-    if (!conversation) return;
-    setRatingScore(score);
-    setRatingError('');
-    try {
-      await rateConversation({
-        visitorToken: conversation.visitorToken,
-        tenantCode: tenantCodeParam,
-        conversationId: conversation.id,
-        score,
-      });
-    } catch (e: any) {
-      setRatingError(e?.message || '评价提交失败，请稍后重试');
-      setRatingScore(null);
-    }
-  };
-
   // 4. Send Message
   const handleSendMessage = async (
     textToSend?: string,
@@ -666,7 +674,7 @@ export const ChatPage: React.FC = () => {
     try {
       setIsUploading(true);
       console.log('[file] uploading', file.name, file.type, file.size);
-      const res = await uploadFile(file);
+      const res = await uploadFile(file, { visitorToken: conversation.visitorToken });
       console.log('[file] uploaded →', res);
 
       console.log('[file] sending message...');
@@ -726,8 +734,6 @@ export const ChatPage: React.FC = () => {
     e.stopPropagation();
     setIsDraggingOver(false);
 
-    if (conversation?.status === 'closed') return;
-
     const files = Array.from(e.dataTransfer.files || []) as File[];
     for (const file of files) {
       await processVisitorFile(file);
@@ -735,7 +741,6 @@ export const ChatPage: React.FC = () => {
   };
 
   const handlePaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    if (conversation?.status === 'closed') return;
     const items = e.clipboardData?.items;
     if (!items) return;
 
@@ -761,7 +766,7 @@ export const ChatPage: React.FC = () => {
   };
 
   const handleStartVoiceRecording = (e: React.MouseEvent | React.TouchEvent) => {
-    if (conversation?.status === 'closed' || !conversation) return;
+    if (!conversation) return;
     e.preventDefault();
 
     if ('touches' in e && e.touches.length > 0) {
@@ -922,7 +927,7 @@ export const ChatPage: React.FC = () => {
       const file = new File([blob], `voice-${Date.now()}.${ext}`, {
         type: blob.type || 'audio/webm',
       });
-      const res = await uploadFile(file, { type: 'audio', durationSeconds: duration });
+      const res = await uploadFile(file, { type: 'audio', durationSeconds: duration, visitorToken: conversation.visitorToken });
       await sendVisitorMessage(conversation.id, {
         senderId: conversation.visitorToken,
         senderName: conversation.visitorName,
@@ -978,6 +983,7 @@ export const ChatPage: React.FC = () => {
   };
 
   const themeColor = tenantConfig?.theme_color || '#1972f5';
+  const brandName = tenantConfig?.brand_name || tenantConfig?.tenant_name || '光年跃迁';
   const isWorking = isWithinWorkHours();
 
   // Core Chat Window JSX (reusable in standalone or embed)
@@ -1019,14 +1025,20 @@ export const ChatPage: React.FC = () => {
       (conversation?.assignedAgentName
         ? agentPresence[conversation.assignedAgentName]
         : undefined) ||
+      // 兜底：未分配但坐席已回复时，按最近回复坐席名查在线状态（回复即接待中）
+      (lastAgentSenderName ? agentPresence[lastAgentSenderName] : undefined) ||
       assignedAgent?.status ||
       conversation?.assignedAgentStatus;
 
     // pre_chat 迎宾阶段（访客未发首条消息，坐席尚未分配）：头部展示 AI 助手
     const isPreChat = conversation?.status === 'pre_chat' && !conversation?.assignedAgentId;
-    // 已进线但暂无坐席受理（排队中）
+    // 已进线但暂无坐席受理（排队中）；坐席已回复过消息则视为接待中（回复即接管，
+    // 后端未自动分配时也按最近回复坐席展示，避免头部停留在「正在接入」态）
     const isQueuedUnassigned =
-      !isPreChat && conversation?.status === 'queued' && !conversation?.assignedAgentId;
+      !isPreChat &&
+      conversation?.status === 'queued' &&
+      !conversation?.assignedAgentId &&
+      !lastAgentSenderName;
     const headerName = isPreChat ? 'AI 助手' : isQueuedUnassigned ? '人工客服' : agentDisplayName;
     const headerTitle = isPreChat
       ? '智能在线客服'
@@ -1039,10 +1051,7 @@ export const ChatPage: React.FC = () => {
         ? 'away'
         : agentStatus;
     const headerAvatar = isPreChat
-      ? tenantConfig?.default_avatar ||
-        `data:image/svg+xml;utf8,${encodeURIComponent(
-          '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="48" fill="#2563eb"/><path d="M28 48 C28 32, 44 26, 50 38 L54 62 C60 74, 74 68, 74 52 C74 38, 66 32, 58 35" stroke="white" stroke-width="10" stroke-linecap="round" fill="none"/></svg>',
-        )}`
+      ? tenantConfig?.default_avatar || AI_DEFAULT_AVATAR
       : assignedAgent?.avatar || '/avatars/agent-female.png';
 
     return (
@@ -1065,13 +1074,13 @@ export const ChatPage: React.FC = () => {
 
         {/* Crisp-Style Replicated Header */}
         <ChatHeader
-          tenantName={tenantConfig?.tenant_name || '光年跃迁'}
+          tenantName={brandName}
           themeColor={themeColor}
           agentName={headerName}
           agentAvatar={headerAvatar}
           agentStatus={headerStatus}
           agentTitle={headerTitle}
-          agentBio={assignedAgent?.bio || `欢迎咨询 ${tenantConfig?.tenant_name || '光年跃迁'}，我们将竭诚为您解答产品、计费与系统对接相关疑问。`}
+          agentBio={assignedAgent?.bio || `欢迎咨询 ${brandName}，我们将竭诚为您解答产品、计费与系统对接相关疑问。`}
           isConnecting={isConnecting}
           isEmbed={isEmbed}
           onClose={() => {
@@ -1084,7 +1093,10 @@ export const ChatPage: React.FC = () => {
             }
             if (isEmbed) {
               try {
+                // 旧版 widget.js / 演示宿主页
                 window.parent?.postMessage({ type: 'LIVECHAT_MINIMIZE' }, '*');
+                // 生产环境后端 LightChat loader
+                window.parent?.postMessage({ type: 'livechat:close' }, '*');
               } catch {
                 // ignore
               }
@@ -1094,7 +1106,6 @@ export const ChatPage: React.FC = () => {
           onToggleSound={handleToggleSound}
           onExportTranscript={handleExportTranscript}
           isWorkingHours={isWorking}
-          onToggleWorkHours={() => setWorkStatusMode((prev) => (prev === 'work' ? 'offline' : 'work'))}
         />
 
         {/* Main Message Stream */}
@@ -1137,7 +1148,7 @@ export const ChatPage: React.FC = () => {
 
               {/* 迎宾快捷引导选项：紧跟欢迎语气泡之后，仅在访客发首条消息前展示，点击直接发送（首条消息触发坐席分配） */}
               {showGuideOptions && (
-                <div className="flex flex-wrap gap-1.5 pt-1 pb-2 pl-[40px] pr-3.5">
+                <div className="flex flex-wrap gap-1.5 pt-1 pb-2 pl-10 pr-3.5">
                   {tenantConfig!.guide_options.map((opt) => (
                     <button
                       key={opt}
@@ -1160,36 +1171,6 @@ export const ChatPage: React.FC = () => {
                     <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce [animation-delay:0.4s]" />
                   </div>
                   <span>{agentDisplayName} 正在输入...</span>
-                </div>
-              )}
-
-              {conversation?.status === 'closed' && (
-                <div className="flex flex-col items-center my-3 gap-2.5">
-                  <span className="text-xs bg-slate-100 text-slate-500 px-3 py-1 rounded-full font-medium border border-slate-200">
-                    当前会话已结束
-                  </span>
-                  {/* Service rating (backend: POST /widget/session/rate) */}
-                  {ratingScore === null ? (
-                    <div className="flex items-center gap-2 text-xs text-slate-500 bg-white border border-slate-200 rounded-full px-3.5 py-1.5 shadow-xs">
-                      <span>请为本次服务评分</span>
-                      {[1, 2, 3, 4, 5].map((n) => (
-                        <button
-                          key={n}
-                          type="button"
-                          onClick={() => handleRateConversation(n)}
-                          className="text-amber-400 hover:text-amber-500 hover:scale-110 transition cursor-pointer"
-                          title={`${n} 星`}
-                        >
-                          ★
-                        </button>
-                      ))}
-                    </div>
-                  ) : (
-                    <span className="text-xs text-emerald-600 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-full font-medium">
-                      感谢您的评价 ({ratingScore} 星)
-                    </span>
-                  )}
-                  {ratingError && <span className="text-[11px] text-red-500">{ratingError}</span>}
                 </div>
               )}
 
@@ -1267,7 +1248,6 @@ export const ChatPage: React.FC = () => {
                       onTouchMove={handleVoiceTouchMove}
                       onMouseMove={handleVoiceMouseMove}
                       onMouseLeave={handleVoiceMouseLeave}
-                      disabled={conversation?.status === 'closed'}
                       className={`w-full h-11 rounded-xl flex items-center justify-center gap-2 font-semibold text-xs tracking-wide transition-all shadow-2xs select-none cursor-pointer ${
                         isVoiceRecording
                           ? isVoiceCancelWarning
@@ -1309,7 +1289,6 @@ export const ChatPage: React.FC = () => {
                   <textarea
                     ref={textareaRef}
                     rows={2}
-                    disabled={conversation?.status === 'closed'}
                     value={inputText}
                     onChange={handleInputChange}
                     onFocus={() => setIsInputFocused(true)}
@@ -1328,7 +1307,7 @@ export const ChatPage: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => setShowEmojiPicker((prev) => !prev)}
-                      disabled={conversation?.status === 'closed' || isVoiceMode}
+                      disabled={isVoiceMode}
                       className="p-1 rounded-md hover:text-slate-800 transition cursor-pointer disabled:opacity-40"
                       title="插入表情"
                     >
@@ -1338,7 +1317,7 @@ export const ChatPage: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => fileInputRef.current?.click()}
-                      disabled={isUploading || conversation?.status === 'closed'}
+                      disabled={isUploading}
                       className="p-1 rounded-md hover:text-slate-800 transition cursor-pointer disabled:opacity-40"
                       title="添加附件或图片"
                     >
@@ -1352,7 +1331,6 @@ export const ChatPage: React.FC = () => {
                         setIsVoiceMode((prev) => !prev);
                         setShowEmojiPicker(false);
                       }}
-                      disabled={conversation?.status === 'closed'}
                       className={`p-1 rounded-md transition cursor-pointer ${
                         isVoiceMode
                           ? 'text-blue-600 bg-blue-50 ring-1 ring-blue-200'
@@ -1383,7 +1361,7 @@ export const ChatPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => handleSendMessage()}
-                    disabled={!inputText.trim() || conversation?.status === 'closed' || isVoiceMode}
+                    disabled={!inputText.trim() || isVoiceMode}
                     className={`p-1.5 transition select-none ${
                       inputText.trim() && !isVoiceMode
                         ? 'hover:opacity-80 active:scale-95 cursor-pointer'
@@ -1467,49 +1445,54 @@ export const ChatPage: React.FC = () => {
   // If accessed directly via /chat, show the crisp widget floating on a simulated clean web canvas
   return (
     <div className="min-h-screen bg-slate-100 text-slate-800 flex flex-col items-center justify-center p-3 sm:p-6 select-none relative overflow-hidden">
-      {/* Floating Crisp Widget Card or Minimized Placeholder */}
-      {isMinimized ? (
-        <div className="flex flex-col items-center justify-center text-center p-8 max-w-md bg-white rounded-2xl shadow-sm border border-slate-200">
-          <div className="w-12 h-12 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center mb-3">
-            <Sparkles className="w-6 h-6" />
-          </div>
-          <h3 className="font-semibold text-slate-800 text-base mb-1">对话窗口已最小化</h3>
-          <p className="text-xs text-slate-500 mb-4">
-            已收起至右下角客服头像处。点击右下角 James 头像随时展开。
-          </p>
-          <button
-            type="button"
-            onClick={() => setIsMinimized(false)}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-xl transition shadow-sm cursor-pointer"
-          >
-            展开对话窗口
-          </button>
-        </div>
-      ) : (
-        <div className="w-full max-w-96.25 h-165 max-h-[94vh] rounded-3xl shadow-[0_16px_50px_rgba(0,0,0,0.18),0_4px_16px_rgba(0,0,0,0.06)] border border-black/6 overflow-hidden bg-white flex flex-col relative">
+      {/* 稳定高度舞台：展开/折叠共用同一容器，折叠时窗口向右下角头像方向缩放淡出，页面不跳动 */}
+      <div className="relative w-full max-w-96.25 h-165 max-h-[94vh] flex items-center justify-center">
+        {/* Floating Crisp Widget Card */}
+        <div
+          className={`w-full h-full rounded-3xl shadow-[0_16px_50px_rgba(0,0,0,0.18),0_4px_16px_rgba(0,0,0,0.06)] border border-black/6 overflow-hidden bg-white flex flex-col relative transition-all duration-300 ease-out ${isMinimized ? 'opacity-0 scale-[0.85] translate-y-14 pointer-events-none' : 'opacity-100 scale-100 translate-y-0'}`}
+          style={{ transformOrigin: '100% 100%' }}
+        >
           {renderChatWidget()}
         </div>
-      )}
 
-      {/* Persistent Bottom-Right Avatar Launcher when minimized */}
-      {isMinimized && (
-        <button
-          type="button"
-          onClick={() => setIsMinimized(false)}
-          className="fixed bottom-6 right-6 w-14 h-14 rounded-full bg-white border-2 border-white shadow-[0_8px_24px_rgba(0,0,0,0.18),0_2px_8px_rgba(0,0,0,0.08)] cursor-pointer hover:scale-105 active:scale-95 transition-all z-50 flex items-center justify-center group"
-          title="展开客服聊天"
-        >
-          <img
-            src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80"
-            alt="James"
-            className="w-full h-full rounded-full object-cover"
-          />
-          <span className="absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full bg-[#00c853] border-2 border-white shadow-xs" />
-          <span className="absolute right-16 px-2.5 py-1 rounded-lg bg-slate-900 text-white text-xs font-medium whitespace-nowrap opacity-0 group-hover:opacity-100 transition shadow-lg pointer-events-none">
-            与 James 在线咨询
-          </span>
-        </button>
-      )}
+        {/* Minimized Placeholder（覆盖层淡入淡出，不改变布局高度） */}
+        <div className={`absolute inset-0 flex items-center justify-center p-6 transition-all duration-300 ease-out ${isMinimized ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+          <div className="flex flex-col items-center justify-center text-center p-8 max-w-md bg-white rounded-2xl shadow-sm border border-slate-200">
+            <div className="w-12 h-12 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center mb-3">
+              <Sparkles className="w-6 h-6" />
+            </div>
+            <h3 className="font-semibold text-slate-800 text-base mb-1">对话窗口已最小化</h3>
+            <p className="text-xs text-slate-500 mb-4">
+              已收起至右下角客服头像处。点击右下角客服头像随时展开。
+            </p>
+            <button
+              type="button"
+              onClick={() => setIsMinimized(false)}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-xl transition shadow-sm cursor-pointer"
+            >
+              展开对话窗口
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Bottom-Right Avatar Launcher：常驻挂载，折叠时回弹出现（聊天窗收入头像的落点） */}
+      <button
+        type="button"
+        onClick={() => setIsMinimized(false)}
+        className={`fixed bottom-6 right-6 w-14 h-14 rounded-full bg-white border-2 border-white shadow-[0_8px_24px_rgba(0,0,0,0.18),0_2px_8px_rgba(0,0,0,0.08)] cursor-pointer hover:scale-105 active:scale-95 transition-all duration-300 ease-out z-50 flex items-center justify-center group ${isMinimized ? 'opacity-100 scale-100' : 'opacity-0 scale-0 pointer-events-none'}`}
+        title="展开客服聊天"
+      >
+        <img
+          src={tenantConfig?.default_avatar || AI_DEFAULT_AVATAR}
+          alt="在线客服"
+          className="w-full h-full rounded-full object-cover"
+        />
+        <span className="absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full bg-[#00c853] border-2 border-white shadow-xs" />
+        <span className="absolute right-16 px-2.5 py-1 rounded-lg bg-slate-900 text-white text-xs font-medium whitespace-nowrap opacity-0 group-hover:opacity-100 transition shadow-lg pointer-events-none">
+          与客服在线咨询
+        </span>
+      </button>
     </div>
   );
 };

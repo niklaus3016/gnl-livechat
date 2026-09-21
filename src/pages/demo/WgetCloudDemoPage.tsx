@@ -217,7 +217,7 @@ export const WgetCloudDemoPage: React.FC = () => {
               {/* User profile bottom */}
               <div className="p-2.5 border-t border-[#1e293b] flex items-center gap-2 text-xs">
                 <img
-                  src="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&auto=format&fit=crop&q=80"
+                  src="/avatars/agent-male.png"
                   alt="User"
                   className="w-7 h-7 rounded-full border border-slate-700 object-cover"
                 />
@@ -255,7 +255,7 @@ export const WgetCloudDemoPage: React.FC = () => {
                   {/* Welcome Card */}
                   <div className="bg-white rounded-xl p-4 border border-slate-200/80 shadow-xs flex items-start gap-3">
                     <img
-                      src="https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120&auto=format&fit=crop&q=80"
+                      src="/avatars/agent-male.png"
                       alt="User"
                       className="w-11 h-11 rounded-full border-2 border-slate-200 object-cover shrink-0"
                     />
@@ -362,16 +362,16 @@ export const WgetCloudDemoPage: React.FC = () => {
               />
             </div>
 
-            {/* Floating Avatar Launcher Button (James Avatar with Green Online Dot) */}
+            {/* Floating Avatar Launcher Button (Generic Agent Avatar with Green Online Dot) */}
             <button
               type="button"
               onClick={() => setIsOpen((prev) => !prev)}
               className="w-13 h-13 rounded-full bg-white border-2 border-white shadow-[0_8px_24px_rgba(0,0,0,0.18),0_2px_6px_rgba(0,0,0,0.08)] cursor-pointer hover:scale-105 active:scale-95 transition-all flex items-center justify-center relative pointer-events-auto group"
-              title={isOpen ? '点击最小化收起对话框' : '点击展开在线客服 (James)'}
+              title={isOpen ? '点击最小化收起对话框' : '点击展开在线客服'}
             >
               <img
-                src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80"
-                alt="在线客服 James"
+                src="/avatars/agent-male.png"
+                alt="在线客服"
                 className="w-full h-full rounded-full object-cover"
               />
               {/* Crisp Vivid Green Online Indicator Dot */}
@@ -380,7 +380,7 @@ export const WgetCloudDemoPage: React.FC = () => {
               {/* Hover Tooltip when collapsed */}
               {!isOpen && (
                 <span className="absolute right-15 px-2.5 py-1 rounded-lg bg-[#0f172a] text-white text-[11px] font-medium whitespace-nowrap opacity-0 group-hover:opacity-100 transition shadow-lg pointer-events-none">
-                  与 James 在线咨询
+                  与客服在线咨询
                 </span>
               )}
             </button>

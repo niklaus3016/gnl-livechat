@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { getConversationList, deleteConversation, ApiError } from '../../api';
 import { mockWsBus } from '../../lib/mock/mock-ws-bus';
+import { realSocket } from '../../lib/real/socket-service';
 import { Conversation, ChannelType } from '../../types';
 import { Search, Inbox, Archive, User, Clock, MessageSquare, Globe, Send, Trash2 } from 'lucide-react';
 import { formatConversationTime } from '../../utils/format';
@@ -43,6 +44,10 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [keyword, setKeyword] = useState('');
   const [loading, setLoading] = useState(false);
+  // 访客在线状态表：conversationId → online（仅坐席实时模式维护；监控只读页不连接 socket）
+  const [presence, setPresence] = useState<Record<string, boolean>>({});
+  // 每个会话独立的离线防抖定时器（与详情页一致：掉线延迟 5s 变灰，刷新/抖动不闪烁）
+  const offlineTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   const fetchConversations = async () => {
     try {
@@ -52,6 +57,14 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
         keyword: keyword.trim(),
       });
       setConversations(res.list);
+      // 坐席工作台：批量订阅进行中会话房间，拿 join ack 初始在线状态 + 后续 presence 广播。
+      // socket-service 内部有去重（agentJoinedRooms）与断线重连恢复（agentRoomRestore），
+      // 列表里只会出现「分配给我」或「排队中（未分配）」的会话，均在权限范围内。
+      if (!readOnly) {
+        res.list
+          .filter((c) => c.status !== 'closed')
+          .forEach((c) => realSocket.joinConversation(c.id));
+      }
     } catch (err) {
       console.error('Failed to load conversations:', err);
     } finally {
@@ -103,6 +116,39 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
     };
   }, [activeTab, keyword]);
 
+  // 列表访客在线点：join ack 初始状态 + presence 实时广播（仅坐席实时模式）。
+  // 在线立即变绿；离线延迟 5s 变灰，访客刷新页面/网络抖动不会闪灰，与详情页同口径。
+  useEffect(() => {
+    if (readOnly) return;
+    const unbind = mockWsBus.on(
+      'visitor_presence',
+      (p: { conversationId?: string; online?: boolean }) => {
+        const cid = p?.conversationId;
+        if (!cid) return;
+        const timers = offlineTimersRef.current;
+        const oldTimer = timers.get(cid);
+        if (oldTimer) {
+          clearTimeout(oldTimer);
+          timers.delete(cid);
+        }
+        if (p.online) {
+          setPresence((prev) => (prev[cid] === true ? prev : { ...prev, [cid]: true }));
+        } else {
+          const timer = setTimeout(() => {
+            timers.delete(cid);
+            setPresence((prev) => (prev[cid] === false ? prev : { ...prev, [cid]: false }));
+          }, 5000);
+          timers.set(cid, timer);
+        }
+      },
+    );
+    return () => {
+      unbind();
+      offlineTimersRef.current.forEach((t) => clearTimeout(t));
+      offlineTimersRef.current.clear();
+    };
+  }, [readOnly]);
+
   const handleItemClick = (id: string) => {
     if (onSelectConversation) {
       onSelectConversation(id);
@@ -131,7 +177,7 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
   const handleClearClosed = async () => {
     const ids = conversations.filter((c) => c.status === 'closed').map((c) => c.id);
     if (ids.length === 0) return;
-    if (!window.confirm(`确定永久删除全部 ${ids.length} 条已结束会话吗？删除后不可恢复。`)) return;
+    if (!window.confirm(`确定永久删除全部 ${ids.length} 条已归档会话吗？删除后不可恢复。`)) return;
     const results = await Promise.allSettled(ids.map((id) => deleteConversation(id)));
     const failed = results.filter((r) => r.status === 'rejected').length;
     if (failed > 0) {
@@ -247,7 +293,7 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
             }`}
           >
             <Archive className="w-3.5 h-3.5" />
-            <span>已结束会话</span>
+            <span>已归档会话</span>
           </button>
         </div>
 
@@ -255,10 +301,7 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
         <div className="flex items-center gap-1 overflow-x-auto pb-0.5 text-[11px] no-scrollbar">
           {[
             { id: 'all', label: '全部渠道' },
-            { id: 'web', label: '官网' },
-            { id: 'wecom', label: '企业微信' },
-            { id: 'wechat', label: '公众号' },
-            { id: 'feishu', label: '飞书' },
+            { id: 'web', label: 'Web' },
           ].map((item) => (
             <button
               key={item.id}
@@ -312,6 +355,8 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
             const unread = conv.unreadCountForAgent || 0;
             // Unsent agent draft for this conversation (only meaningful while open)
             const draft = conv.status === 'open' ? agentDrafts?.[conv.id]?.trim() : '';
+            // 访客在线点：真实 presence 在线绿/离线灰；状态未知（null/undefined）按在线展示，不误判
+            const visitorOnline = presence[conv.id] !== false;
 
             return (
               <div
@@ -333,7 +378,12 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
                     {conv.visitorName.substring(0, 1)}
                   </div>
                   {conv.status === 'open' ? (
-                    <span className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 ${dark ? 'border-slate-900' : 'border-white'}`} />
+                    <span
+                      title={visitorOnline ? '访客当前在线' : '访客已离线'}
+                      className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2 transition-colors duration-300 ${
+                        visitorOnline ? 'bg-emerald-500' : 'bg-slate-400'
+                      } ${dark ? 'border-slate-900' : 'border-white'}`}
+                    />
                   ) : (
                     <span className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-slate-400 border-2 ${dark ? 'border-slate-900' : 'border-white'}`} />
                   )}
@@ -370,7 +420,14 @@ export const ConversationSidebar: React.FC<ConversationSidebarProps> = ({
 
                   <div className="flex items-center justify-between text-xs text-slate-400">
                     <span className="truncate max-w-37.5">
-                      {visitorRegion(conv)} · {conv.assignedAgentName || '未分配'}
+                      {visitorRegion(conv)} ·{' '}
+                      {conv.assignedAgentName ? (
+                        conv.assignedAgentName
+                      ) : conv.status === 'queued' ? (
+                        <span className="text-amber-500 font-medium">待认领</span>
+                      ) : (
+                        '未分配'
+                      )}
                     </span>
                     <span className="flex items-center gap-1.5 shrink-0">
                       {unread > 0 && (

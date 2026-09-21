@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { loginAgent, logoutAgent, getCurrentAgentToken } from '../../api';
+import { getRememberedLogin, saveRememberedLogin, clearRememberedLogin } from '../../utils/remembered-login';
 import {
   ShieldCheck,
   Building2,
   Lock,
-  Mail,
+  User,
   ArrowRight,
   Headphones,
   Sliders,
@@ -20,16 +21,13 @@ type Variant = 'tenant' | 'super';
 
 interface VariantConfig {
   badge: string;
-  badgeEn: string;
   title: string;
   accountLabel: string;
-  defaultAccount: string;
   acceptRole: 'tenant_admin' | 'super_admin';
   /** 角色不匹配时的拒绝文案（按误入角色细分） */
   reject: { agent: string; other: string };
   cta: string;
   heroTitle: [string, string];
-  heroDesc: string;
   features: { icon: React.ReactNode; title: string; desc: string }[];
   // 完整类名（Tailwind 不支持动态拼接）
   accent: {
@@ -46,10 +44,8 @@ interface VariantConfig {
 
 const TENANT_CONFIG: VariantConfig = {
   badge: '企业管理控制台',
-  badgeEn: 'Enterprise Admin Portal',
-  title: '企业主 · 管理中心登录',
+  title: '企业管理中心登录',
   accountLabel: '管理员账号',
-  defaultAccount: 'admin',
   acceptRole: 'tenant_admin',
   reject: {
     agent: '此账号为普通在线客服坐席，无企业管理权限，请前往坐席工作台登录。',
@@ -57,27 +53,26 @@ const TENANT_CONFIG: VariantConfig = {
   },
   cta: '进入企业管理中心',
   heroTitle: ['打造企业专属在线接待中心', '与全渠道客户服务矩阵'],
-  heroDesc: '统一调度坐席团队、定制访客端聊天小部件外观、设置营业时间并全景监控实时接待情况。',
   features: [
     {
       icon: <Sliders className="w-4 h-4" />,
-      title: '品牌与欢迎语自配置',
-      desc: '主题色无级拾色、欢迎语与营业时间灵活设限。',
+      title: '品牌视觉专属设置',
+      desc: '品牌名称、主题色与欢迎语自由定制，完美贴合企业品牌形象。',
     },
     {
       icon: <Users className="w-4 h-4" />,
-      title: '坐席席位协同分级',
-      desc: '主管权限与普通客服无缝衔接，会话转接高效协同。',
-    },
-    {
-      icon: <Globe className="w-4 h-4" />,
-      title: 'JS 一键嵌入',
-      desc: '自包含嵌入代码，任意官网一行 script 即可生效。',
+      title: '全局会话实时监控',
+      desc: '访客进线、坐席接待与会话状态实时可视，全局动态尽收眼底。',
     },
     {
       icon: <LayoutGrid className="w-4 h-4" />,
-      title: '接待数据实时洞察',
-      desc: '会话量、响应时长与满意度看板实时掌握。',
+      title: '多维数据深度分析',
+      desc: '会话量、响应时长与满意度多维沉淀，服务洞察一目了然。',
+    },
+    {
+      icon: <Globe className="w-4 h-4" />,
+      title: '一行代码轻松嵌入',
+      desc: '多渠道只需一行代码轻松嵌入，即刻开启专属在线客服。',
     },
   ],
   accent: {
@@ -94,10 +89,8 @@ const TENANT_CONFIG: VariantConfig = {
 
 const SUPER_CONFIG: VariantConfig = {
   badge: '平台运营后台',
-  badgeEn: 'Platform Operations Console',
   title: '平台超级管理员登录',
   accountLabel: '平台超管账号',
-  defaultAccount: 'super',
   acceptRole: 'super_admin',
   reject: {
     agent: '此账号为普通坐席账号，无平台运营权限，请勿在此登录。',
@@ -105,7 +98,6 @@ const SUPER_CONFIG: VariantConfig = {
   },
   cta: '进入平台运营后台',
   heroTitle: ['全平台多租户运营', '与系统资源管控中心'],
-  heroDesc: '面向平台运营团队：租户开通与封禁、SaaS 套餐计费、全网 WebSocket 流量与系统健康度监控。',
   features: [
     {
       icon: <Building2 className="w-4 h-4" />,
@@ -150,11 +142,14 @@ export const AdminLoginPage: React.FC<{ variant?: Variant }> = ({ variant: varia
   const cfg = variant === 'super' ? SUPER_CONFIG : TENANT_CONFIG;
   const loginPath = variant === 'super' ? '/super/login' : '/admin/login';
 
-  const [account, setAccount] = useState(cfg.defaultAccount);
-  const [password, setPassword] = useState('admin123456');
+  // 默认空白：仅当用户上次勾选「记住登录凭据」时才回填（按入口隔离，tenant/super 互不串用）
+  const rememberScope = variant === 'super' ? 'super' : 'tenant';
+  const remembered = getRememberedLogin(rememberScope);
+  const [account, setAccount] = useState(remembered?.account || '');
+  const [password, setPassword] = useState(remembered?.password || '');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [rememberMe, setRememberMe] = useState(true);
+  const [rememberMe, setRememberMe] = useState(!!remembered);
 
   const currentToken = getCurrentAgentToken();
 
@@ -170,6 +165,12 @@ export const AdminLoginPage: React.FC<{ variant?: Variant }> = ({ variant: varia
       if (user.role !== cfg.acceptRole) {
         if (user.role === 'agent') throw new Error(cfg.reject.agent);
         throw new Error(cfg.reject.other);
+      }
+      // 勾选「记住登录凭据」才落库，下次打开本入口自动回填；不勾则清除旧记录
+      if (rememberMe) {
+        saveRememberedLogin(rememberScope, { account: account.trim(), password });
+      } else {
+        clearRememberedLogin(rememberScope);
       }
       navigate(from, { replace: true });
     } catch (err: any) {
@@ -244,19 +245,15 @@ export const AdminLoginPage: React.FC<{ variant?: Variant }> = ({ variant: varia
             {variant === 'super' ? <ShieldCheck className="w-5 h-5" /> : <Building2 className="w-5 h-5" />}
           </div>
           <div>
-            <div className="flex items-center gap-2">
-              <span className="font-bold text-white tracking-tight text-sm sm:text-base">光年跃迁</span>
-              <span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold border ${cfg.accent.chip}`}>
-                {cfg.badge}
-              </span>
-            </div>
-            <p className="text-[10px] text-slate-400">{cfg.badgeEn}</p>
+            <span className="font-bold text-white tracking-tight text-base sm:text-lg">{cfg.badge}</span>
           </div>
         </div>
 
         {cfg.showAgentEntry && (
           <a
             href="/agent/login"
+            target="_blank"
+            rel="noopener noreferrer"
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition border border-slate-700/60"
           >
             <Headphones className="w-3.5 h-3.5 text-blue-400" />
@@ -277,15 +274,13 @@ export const AdminLoginPage: React.FC<{ variant?: Variant }> = ({ variant: varia
               </span>
             </h2>
 
-            <p className="text-sm text-slate-300 leading-relaxed">{cfg.heroDesc}</p>
-
             <div className="grid grid-cols-2 gap-3.5 pt-2">
               {cfg.features.map((f) => (
                 <div key={f.title} className="p-3.5 rounded-xl bg-slate-800/60 border border-slate-700/70">
                   <div className={`w-8 h-8 rounded-lg flex items-center justify-center mb-2.5 ${cfg.accent.iconBg}`}>
                     {f.icon}
                   </div>
-                  <h4 className="text-xs font-bold text-white mb-1">{f.title}</h4>
+                  <h4 className="text-xs font-bold mb-1 text-transparent bg-clip-text bg-linear-to-r from-blue-400 via-indigo-300 to-purple-400">{f.title}</h4>
                   <p className="text-[11px] text-slate-400 leading-normal">{f.desc}</p>
                 </div>
               ))}
@@ -313,13 +308,13 @@ export const AdminLoginPage: React.FC<{ variant?: Variant }> = ({ variant: varia
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1.5">{cfg.accountLabel}</label>
                   <div className="relative">
-                    <Mail className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                    <User className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
                     <input
                       type="text"
                       required
                       value={account}
                       onChange={(e) => setAccount(e.target.value)}
-                      placeholder={cfg.defaultAccount}
+                      placeholder="请输入登录账号"
                       className={`w-full pl-10.5 pr-3.5 py-3.5 text-sm bg-slate-900 border border-slate-800 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-1 transition ${cfg.accent.ring}`}
                     />
                   </div>
@@ -334,7 +329,7 @@ export const AdminLoginPage: React.FC<{ variant?: Variant }> = ({ variant: varia
                       required
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      placeholder="••••••••"
+                      placeholder="请输入登录密码"
                       className={`w-full pl-10.5 pr-3.5 py-3.5 text-sm bg-slate-900 border border-slate-800 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-1 transition ${cfg.accent.ring}`}
                     />
                   </div>
@@ -374,11 +369,7 @@ export const AdminLoginPage: React.FC<{ variant?: Variant }> = ({ variant: varia
 
       {/* Footer */}
       <footer className="py-4 border-t border-slate-800/60 text-center text-xs text-slate-500 z-10">
-        <span>
-          {variant === 'super'
-            ? '光年跃迁 · 平台运营管理后台（内部入口）'
-            : '光年跃迁企业在线客服系统 · 企业管理控制台'}
-        </span>
+        <span>© 2026 光年跃迁（温州）科技有限公司 版权所有｜在线客服系统</span>
       </footer>
     </div>
   );

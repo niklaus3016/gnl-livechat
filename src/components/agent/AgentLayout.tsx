@@ -1,14 +1,13 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import {
   getCurrentAgentToken,
   logoutAgent,
   updateAgentProfile,
   getConversationList,
-  getTenantConfig,
+  getTenantSetting,
   IS_MOCK,
 } from '../../api';
-import { TENANT_KEY } from '../../api/http';
 import { mockWsBus } from '../../lib/mock/mock-ws-bus';
 import { realSocket } from '../../lib/real/socket-service';
 import { AgentStatus, JwtTokenPayload } from '../../types';
@@ -23,6 +22,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Headphones,
+  KeyRound,
   ShieldCheck,
 } from 'lucide-react';
 
@@ -37,12 +37,13 @@ export const AgentLayout: React.FC<AgentLayoutProps> = ({ children }) => {
   const [status, setStatus] = useState<AgentStatus>('online');
   const [unreadTotal, setUnreadTotal] = useState(0);
   const [showStatusMenu, setShowStatusMenu] = useState(false);
-  // Brand name driven by the same tenant_name field as the login page & visitor widget
+  // 左上角品牌名：走 JWT 接口（GET /admin/tenant/config 对本租户坐席只读开放），
+  // 读企业管理员配置的 brand_name，未设置时回退注册全称 tenant_name
   const [tenantName, setTenantName] = useState('');
 
   useEffect(() => {
-    getTenantConfig(TENANT_KEY)
-      .then((c) => setTenantName(c.tenant_name || ''))
+    getTenantSetting()
+      .then((c) => setTenantName(c.brand_name || c.tenant_name || ''))
       .catch(() => undefined);
   }, []);
 
@@ -57,12 +58,28 @@ export const AgentLayout: React.FC<AgentLayoutProps> = ({ children }) => {
 
   // Real backend: ensure the agent realtime socket is connected.
   // connectAgent is idempotent; retrying on route change recovers from early failures.
+  // 登录即上线：连接成功后向后端补报 online（DB + socket）。后端自动分配只认
+  // online_status='online' 的坐席，不补报会导致所有进线都落入排队（queued）。
+  // ref 保证每次页面加载只上报一次；坐席手动切忙碌后不会被路由重连覆盖。
+  const autoOnlineReportedRef = useRef(false);
   useEffect(() => {
     if (IS_MOCK) return;
     if (!getCurrentAgentToken()) return;
-    realSocket.connectAgent().catch((e) => {
-      console.warn('agent socket connect failed:', e?.message || e);
-    });
+    realSocket
+      .connectAgent()
+      .then(() => {
+        if (autoOnlineReportedRef.current) return;
+        autoOnlineReportedRef.current = true;
+        updateAgentProfile({ status: 'online' })
+          .then((updated) => {
+            mockWsBus.send('agent_updated', { ...updated, status: 'online' });
+          })
+          .catch(() => undefined);
+        realSocket.agentStatus('online');
+      })
+      .catch((e) => {
+        console.warn('agent socket connect failed:', e?.message || e);
+      });
   }, [location.pathname]);
 
   // Temporary hover expansion state when collapsed
@@ -174,14 +191,9 @@ export const AgentLayout: React.FC<AgentLayoutProps> = ({ children }) => {
                     <Headphones className="w-5.5 h-5.5" />
                   </div>
                   <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <h1 className="font-bold text-base text-white leading-tight tracking-tight truncate">
-                        {tenantName || '坐席工作台'}
-                      </h1>
-                      <span className="text-[11px] bg-slate-800 text-blue-400 font-semibold px-2 py-0.5 rounded-full border border-blue-500/20 shrink-0">
-                        在线
-                      </span>
-                    </div>
+                    <h1 className="font-bold text-base text-white leading-tight tracking-tight truncate">
+                      {tenantName || '坐席工作台'}
+                    </h1>
                     <p className="text-xs text-slate-400 mt-0.5 truncate">坐席工作台</p>
                   </div>
                 </div>
@@ -402,6 +414,25 @@ export const AgentLayout: React.FC<AgentLayoutProps> = ({ children }) => {
             >
               <Zap className="w-5 h-5 shrink-0" />
               {isExpanded && <span className="truncate">快捷回复模板库</span>}
+            </NavLink>
+
+            <NavLink
+              to="/agent/settings/password"
+              title={!isExpanded ? '修改登录密码' : undefined}
+              className={({ isActive }) =>
+                `flex items-center ${
+                  isExpanded
+                    ? 'gap-3 px-3.5 py-2.5 rounded-xl'
+                    : 'justify-center w-11 h-11 mx-auto rounded-xl'
+                } text-sm font-medium transition ${
+                  isActive
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                }`
+              }
+            >
+              <KeyRound className="w-5 h-5 shrink-0" />
+              {isExpanded && <span className="truncate">修改登录密码</span>}
             </NavLink>
 
             {/* Tenant Admin Restricted Section */}

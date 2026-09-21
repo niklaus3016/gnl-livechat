@@ -6,10 +6,11 @@ import {
   sendAgentMessage,
   markAgentMessagesRead,
   closeConversation,
-  reopenConversation,
   agentUploadFile,
   getCurrentAgentToken,
   joinConversationRoom,
+  claimConversation,
+  getTenantSetting,
 } from '../../api';
 import { mockWsBus } from '../../lib/mock/mock-ws-bus';
 import { formatConversationTime } from '../../utils/format';
@@ -27,6 +28,7 @@ import {
   Mic,
   Zap,
   UserCheck,
+  UserPlus,
   CheckCircle,
   RotateCcw,
   PanelRightClose,
@@ -56,6 +58,8 @@ export const ConversationDetailPage: React.FC = () => {
   const [isUploading, setIsUploading] = useState(false);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
+  // 企业主配置的品牌通用头像，用于 AI 助手欢迎消息气泡
+  const [brandAvatar, setBrandAvatar] = useState<string | undefined>(undefined);
   // Visitor real presence (null = unknown — join ack / broadcast hasn't arrived yet)
   const [visitorOnline, setVisitorOnline] = useState<boolean | null>(null);
   const visitorOfflineTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -72,9 +76,18 @@ export const ConversationDetailPage: React.FC = () => {
   const isVoiceCancelWarningRef = useRef(false);
   const voiceToastTimerRef = useRef<number | null>(null);
   const voiceTouchStartYRef = useRef<number>(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const isRecordingRef = useRef(false);
 
   // Global dragover & drop prevention so browser never navigates or opens dropped files directly
   useEffect(() => {
+    // 取一次企业主配置的品牌通用头像，用于 AI 助手消息气泡
+    getTenantSetting()
+      .then((c) => setBrandAvatar(c.default_avatar))
+      .catch(() => undefined);
+
     const preventBrowserFileOpen = (e: DragEvent) => {
       e.preventDefault();
     };
@@ -85,6 +98,7 @@ export const ConversationDetailPage: React.FC = () => {
       window.removeEventListener('drop', preventBrowserFileOpen);
       if (voiceRecordingTimerRef.current) clearInterval(voiceRecordingTimerRef.current);
       if (voiceToastTimerRef.current) clearTimeout(voiceToastTimerRef.current);
+      mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
     };
   }, []);
 
@@ -335,6 +349,18 @@ export const ConversationDetailPage: React.FC = () => {
   };
 
   // 4. Send Agent Message (Regular or Internal Note)
+  // 排队中（未分配）会话：坐席一旦开始回复（文本/语音/文件），先静默认领给自己，
+  // 避免出现"已经在接待、头部和列表却一直显示未分配"的割裂。认领失败不阻断发送。
+  const ensureClaimed = async () => {
+    if (!conversation || conversation.status !== 'queued') return;
+    try {
+      const claimed = await claimConversation(conversation.id);
+      setConversation(claimed);
+    } catch (e) {
+      console.warn('自动认领失败，继续发送消息:', e);
+    }
+  };
+
   const handleSendMessage = async (isNote = false) => {
     if (!inputText.trim() || !conversation) return;
 
@@ -348,6 +374,7 @@ export const ConversationDetailPage: React.FC = () => {
     clearAgentTyping();
 
     try {
+      await ensureClaimed();
       const newMsg = await sendAgentMessage(conversation.id, {
         senderId: currentUser?.userId || 'agent_1',
         senderName: currentUser?.nickname || '在线坐席',
@@ -387,7 +414,7 @@ export const ConversationDetailPage: React.FC = () => {
     }, 1600);
   };
 
-  const handleStartVoiceRecording = (e: React.MouseEvent | React.TouchEvent) => {
+  const handleStartVoiceRecording = async (e: React.MouseEvent | React.TouchEvent) => {
     if (isClosed || !conversation) return;
     e.preventDefault();
 
@@ -397,6 +424,8 @@ export const ConversationDetailPage: React.FC = () => {
       voiceTouchStartYRef.current = (e as React.MouseEvent).clientY;
     }
 
+    // 立即标记录音中（同步 ref，避免 await getUserMedia 期间 mouseUp 被误判为未录音）
+    isRecordingRef.current = true;
     setIsVoiceRecording(true);
     setIsVoiceCancelWarning(false);
     isVoiceCancelWarningRef.current = false;
@@ -408,10 +437,37 @@ export const ConversationDetailPage: React.FC = () => {
       const elapsed = Math.floor((Date.now() - voiceStartTimeRef.current) / 1000);
       setVoiceDuration(elapsed);
       if (elapsed >= 60) {
-        // Max 60 seconds (WeChat convention)
         handleStopVoiceRecording();
       }
     }, 200);
+
+    // Request mic & start MediaRecorder (real audio recording)
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // 如果在等待授权期间用户已松开，直接结束
+      if (!isRecordingRef.current) {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
+      mediaStreamRef.current = stream;
+      const mime = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4';
+      const recorder = new MediaRecorder(stream, { mimeType: mime });
+      audioChunksRef.current = [];
+      recorder.ondataavailable = (ev) => {
+        if (ev.data.size > 0) audioChunksRef.current.push(ev.data);
+      };
+      recorder.start();
+      mediaRecorderRef.current = recorder;
+    } catch (err) {
+      console.error('Mic access failed:', err);
+      showVoiceToast('无法访问麦克风，请检查浏览器权限');
+      // 重置录音状态
+      if (voiceRecordingTimerRef.current) clearInterval(voiceRecordingTimerRef.current);
+      voiceRecordingTimerRef.current = null;
+      isRecordingRef.current = false;
+      setIsVoiceRecording(false);
+      return;
+    }
   };
 
   const handleVoiceTouchMove = (e: React.TouchEvent) => {
@@ -445,7 +501,8 @@ export const ConversationDetailPage: React.FC = () => {
   };
 
   const handleStopVoiceRecording = async () => {
-    if (!isVoiceRecording) return;
+    if (!isRecordingRef.current) return;
+    isRecordingRef.current = false;
 
     if (voiceRecordingTimerRef.current) {
       clearInterval(voiceRecordingTimerRef.current);
@@ -456,26 +513,74 @@ export const ConversationDetailPage: React.FC = () => {
     const elapsedMs = Date.now() - voiceStartTimeRef.current;
     const duration = Math.max(1, Math.round(elapsedMs / 1000));
 
-    if (isVoiceCancelWarningRef.current) {
+    const cancelled = isVoiceCancelWarningRef.current;
+    setIsVoiceCancelWarning(false);
+    isVoiceCancelWarningRef.current = false;
+
+    // Stop mic tracks
+    mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
+    mediaStreamRef.current = null;
+
+    const recorder = mediaRecorderRef.current;
+    mediaRecorderRef.current = null;
+
+    const discardRecording = () => {
+      audioChunksRef.current = [];
+    };
+
+    if (cancelled) {
+      if (recorder && recorder.state !== 'inactive') recorder.stop();
+      discardRecording();
       showVoiceToast('已取消发送');
-      setIsVoiceCancelWarning(false);
-      isVoiceCancelWarningRef.current = false;
       return;
     }
 
     if (elapsedMs < 800) {
+      if (recorder && recorder.state !== 'inactive') recorder.stop();
+      discardRecording();
       showVoiceToast('说话时间太短');
       return;
     }
 
-    if (!conversation) return;
+    if (!conversation) {
+      discardRecording();
+      return;
+    }
+
+    // Wait for MediaRecorder to flush final chunk
+    const blob = await new Promise<Blob>((resolve) => {
+      if (!recorder || recorder.state === 'inactive') {
+        resolve(new Blob(audioChunksRef.current, { type: 'audio/webm' }));
+        return;
+      }
+      recorder.onstop = () =>
+        resolve(new Blob(audioChunksRef.current, { type: recorder.mimeType || 'audio/webm' }));
+      recorder.stop();
+    });
+    audioChunksRef.current = [];
+
+    if (!blob || blob.size === 0) {
+      showVoiceToast('录音失败，请重试');
+      return;
+    }
 
     try {
+      await ensureClaimed();
+      setIsUploading(true);
+      const ext = blob.type.includes('mp4') ? 'm4a' : blob.type.includes('ogg') ? 'ogg' : 'webm';
+      const file = new File([blob], `voice-${Date.now()}.${ext}`, {
+        type: blob.type || 'audio/webm',
+      });
+      const res = await agentUploadFile(file);
       const newMsg = await sendAgentMessage(conversation.id, {
         senderId: currentUser?.userId || 'agent_1',
         senderName: currentUser?.nickname || '在线坐席',
         content: `[语音消息 ${duration}"]`,
         msgType: 'voice',
+        fileUrl: res.url,
+        fileName: res.name,
+        fileSize: res.size,
+        fileSizeBytes: res.sizeBytes,
         voiceDuration: duration,
         isInternalNote: false,
       });
@@ -488,6 +593,9 @@ export const ConversationDetailPage: React.FC = () => {
       if (soundEnabled) playNotificationSound('message');
     } catch (err) {
       console.error('Failed to send voice message:', err);
+      showVoiceToast(err instanceof Error ? err.message : '语音发送失败，请重试');
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -497,8 +605,16 @@ export const ConversationDetailPage: React.FC = () => {
     const isImg = file.type.startsWith('image/');
     const isVideo = isVideoForce || file.type.startsWith('video/') || file.name.endsWith('.mp4') || file.name.endsWith('.webm');
 
+    // 视频大小限制：100MB
+    const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
+    if (isVideo && file.size > MAX_VIDEO_BYTES) {
+      showVoiceToast('视频文件不能超过 100MB');
+      return;
+    }
+
     try {
       setIsUploading(true);
+      await ensureClaimed();
       const res = await agentUploadFile(file);
 
       const newMsg = await sendAgentMessage(conversation.id, {
@@ -509,6 +625,7 @@ export const ConversationDetailPage: React.FC = () => {
         fileUrl: res.url,
         fileName: res.name,
         fileSize: res.size,
+        fileSizeBytes: res.sizeBytes,
         isInternalNote: false,
       });
 
@@ -518,6 +635,7 @@ export const ConversationDetailPage: React.FC = () => {
       });
     } catch (err) {
       console.error('Upload failed:', err);
+      showVoiceToast(err instanceof Error ? err.message : '发送失败，请重试');
     } finally {
       setIsUploading(false);
     }
@@ -528,31 +646,6 @@ export const ConversationDetailPage: React.FC = () => {
     if (!file) return;
     await processFile(file, isVideo);
     if (e.target) e.target.value = '';
-  };
-
-  const handleSendSampleVideo = async () => {
-    if (!conversation) return;
-    try {
-      setIsUploading(true);
-      const newMsg = await sendAgentMessage(conversation.id, {
-        senderId: currentUser?.userId || 'agent_1',
-        senderName: currentUser?.nickname || '在线坐席',
-        content: '光年跃迁 客户端节点切换与加速配置操作演示',
-        msgType: 'video',
-        fileUrl: 'https://www.w3schools.com/html/mov_bbb.mp4',
-        fileName: 'client_setup_guide.mp4',
-        fileSize: '4.8 MB',
-        isInternalNote: false,
-      });
-      setMessages((prev) => {
-        if (prev.some((m) => m.id === newMsg.id)) return prev;
-        return [...prev, newMsg];
-      });
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setIsUploading(false);
-    }
   };
 
   // Drag & Drop Handlers
@@ -613,22 +706,29 @@ export const ConversationDetailPage: React.FC = () => {
     }
   };
 
-  // 6. Close or Reopen Conversation
-  const handleCloseConversation = async () => {
-    if (!conversation) return;
-    if (!window.confirm('确定要结束该会话吗？结束后访客端将提示会话完成。')) return;
+  // 6. 认领排队中（未分配）的会话：指派给当前坐席并转为进行中
+  const [claiming, setClaiming] = useState(false);
+  const handleClaimConversation = async () => {
+    if (!conversation || claiming) return;
+    setClaiming(true);
     try {
-      const updated = await closeConversation(conversation.id);
+      const updated = await claimConversation(conversation.id);
       setConversation(updated);
+      showVoiceToast('已认领，该会话已分配给你');
     } catch (e) {
       console.error(e);
+      showVoiceToast('认领失败，请重试');
+    } finally {
+      setClaiming(false);
     }
   };
 
-  const handleReopenConversation = async () => {
+  // 7. Archive Conversation (visitor-side reopen is automatic on next message)
+  const handleCloseConversation = async () => {
     if (!conversation) return;
+    if (!window.confirm('确定要归档该会话吗？归档后访客仍可继续发消息，消息会自动重新分配接待。')) return;
     try {
-      const updated = await reopenConversation(conversation.id);
+      const updated = await closeConversation(conversation.id);
       setConversation(updated);
     } catch (e) {
       console.error(e);
@@ -657,6 +757,8 @@ export const ConversationDetailPage: React.FC = () => {
   }
 
   const isClosed = conversation.status === 'closed';
+  // 排队中（未分配）：出现在所有坐席列表里，等待坐席认领
+  const isQueued = conversation.status === 'queued';
 
   return (
     <div className="h-full w-full flex overflow-hidden">
@@ -710,7 +812,7 @@ export const ConversationDetailPage: React.FC = () => {
                       : 'bg-slate-100 text-slate-600 border border-slate-200'
                   }`}
                 >
-                  {!isClosed ? '进行中' : '已结束'}
+                  {!isClosed ? '进行中' : '已归档'}
                 </span>
 
                 {/* Channel Source Badge */}
@@ -741,14 +843,21 @@ export const ConversationDetailPage: React.FC = () => {
                 {(!conversation.channel || conversation.channel === 'web') && (
                   <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-slate-100 text-slate-600 border border-slate-200 flex items-center gap-1">
                     <Globe className="w-3 h-3 text-blue-600" />
-                    Web官网咨询
+                    Web
                   </span>
                 )}
               </div>
               <div className="text-[11px] text-slate-500 flex items-center gap-2 mt-0.5">
                 <span>归属地：{conversation.visitorInfo?.location || '未知地域'}</span>
                 <span>·</span>
-                <span>接待人：{conversation.assignedAgentName || '未分配'}</span>
+                <span>
+                  接待人：
+                  {conversation.assignedAgentName ? (
+                    conversation.assignedAgentName
+                  ) : (
+                    <span className={isQueued ? 'text-amber-600 font-medium' : ''}>待认领</span>
+                  )}
+                </span>
               </div>
             </div>
           </div>
@@ -765,6 +874,19 @@ export const ConversationDetailPage: React.FC = () => {
               {soundEnabled ? <Volume2 className="w-4 h-4 text-blue-600" /> : <VolumeX className="w-4 h-4 text-slate-400" />}
             </button>
 
+            {/* Claim queued (unassigned) conversation */}
+            {!isClosed && isQueued && (
+              <button
+                type="button"
+                onClick={handleClaimConversation}
+                disabled={claiming}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium rounded-lg transition cursor-pointer disabled:opacity-60 disabled:cursor-default"
+              >
+                <UserPlus className="w-3.5 h-3.5" />
+                <span>{claiming ? '认领中…' : '认领接待'}</span>
+              </button>
+            )}
+
             {/* Transfer Dropdown Button */}
             {!isClosed && (
               <button
@@ -777,24 +899,15 @@ export const ConversationDetailPage: React.FC = () => {
               </button>
             )}
 
-            {/* Close / Reopen */}
-            {!isClosed ? (
+            {/* Archive */}
+            {!isClosed && (
               <button
                 type="button"
                 onClick={handleCloseConversation}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 text-xs font-medium rounded-lg transition border border-red-200 cursor-pointer"
               >
                 <CheckCircle className="w-3.5 h-3.5" />
-                <span>结束会话</span>
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={handleReopenConversation}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-medium rounded-lg transition border border-emerald-200 cursor-pointer"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span>重新激活会话</span>
+                <span>归档会话</span>
               </button>
             )}
 
@@ -838,6 +951,7 @@ export const ConversationDetailPage: React.FC = () => {
               }
               themeColor="#2563eb"
               isAgentWorkbenchView={true}
+              botAvatar={brandAvatar}
             />
           ))}
 
@@ -927,20 +1041,20 @@ export const ConversationDetailPage: React.FC = () => {
                 type="button"
                 onClick={() => imageInputRef.current?.click()}
                 disabled={isUploading || isClosed}
-                className="p-1.5 rounded-lg hover:bg-slate-100 hover:text-slate-800 transition cursor-pointer disabled:opacity-40"
+                className="p-1.5 rounded-lg hover:bg-purple-50 transition cursor-pointer disabled:opacity-40"
                 title="发送图片"
               >
-                <ImageIcon className="w-4 h-4" />
+                <ImageIcon className="w-4 h-4 text-purple-600" />
               </button>
 
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={isUploading || isClosed}
-                className="p-1.5 rounded-lg hover:bg-slate-100 hover:text-slate-800 transition cursor-pointer disabled:opacity-40"
+                className="p-1.5 rounded-lg hover:bg-purple-50 transition cursor-pointer disabled:opacity-40"
                 title="发送文件附件 (支持大文件)"
               >
-                <Paperclip className="w-4 h-4" />
+                <Paperclip className="w-4 h-4 text-purple-600" />
               </button>
 
               {/* WeChat-style Voice Input Button */}
@@ -954,8 +1068,8 @@ export const ConversationDetailPage: React.FC = () => {
                 disabled={isUploading || isClosed}
                 className={`p-1.5 rounded-lg transition cursor-pointer disabled:opacity-40 flex items-center gap-1 ${
                   isVoiceMode
-                    ? 'bg-blue-100 text-blue-700 font-medium ring-1 ring-blue-400/50'
-                    : 'hover:bg-slate-100 hover:text-slate-800 text-slate-500'
+                    ? 'bg-purple-100 text-purple-700 font-medium ring-1 ring-purple-400/50'
+                    : 'hover:bg-purple-50 text-purple-600'
                 }`}
                 title={isVoiceMode ? '点击切换回键盘输入' : '语音输入 (点击后按住说话)'}
               >
@@ -968,21 +1082,10 @@ export const ConversationDetailPage: React.FC = () => {
                 type="button"
                 onClick={() => videoInputRef.current?.click()}
                 disabled={isUploading || isClosed}
-                className="p-1.5 rounded-lg hover:bg-slate-100 hover:text-slate-800 transition cursor-pointer disabled:opacity-40"
+                className="p-1.5 rounded-lg hover:bg-purple-50 transition cursor-pointer disabled:opacity-40"
                 title="上传或发送产品演示视频 (.mp4)"
               >
                 <Film className="w-4 h-4 text-purple-600" />
-              </button>
-
-              {/* Quick Sample Video */}
-              <button
-                type="button"
-                onClick={handleSendSampleVideo}
-                disabled={isUploading || isClosed}
-                className="px-2 py-0.5 rounded text-[11px] font-medium bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200 transition cursor-pointer disabled:opacity-40"
-                title="一键发送官方配置演示视频消息"
-              >
-                演示视频
               </button>
 
               {isUploading && (
@@ -1081,7 +1184,7 @@ export const ConversationDetailPage: React.FC = () => {
                 onFocus={handleInputFocus}
                 placeholder={
                   isClosed
-                    ? '会话已关闭，重新激活后方可继续回复'
+                    ? '会话已归档，访客再次发消息时将自动重新分配接待'
                     : '请输入回复内容...'
                 }
                 className="w-full min-h-28.75 p-3.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 resize-y leading-relaxed transition disabled:bg-slate-100"

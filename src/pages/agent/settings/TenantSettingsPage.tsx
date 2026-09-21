@@ -452,7 +452,7 @@ export const TenantSettingsPage: React.FC = () => {
                   离线不活跃会话自动归档天数
                 </div>
                 <div className="text-[11px] text-slate-500 mt-0.5">
-                  无应答会话将在达到天数后自动标记为已结束
+                  无应答会话将在达到天数后自动归档
                 </div>
               </div>
               <div className="flex items-center gap-2">

@@ -1,6 +1,6 @@
 # 前端联调测试用例（在线客服系统）
 
-> 后端地址：`http://localhost:3003`　Socket namespace：`/ws`
+> 后端地址：`http://localhost:3005`　Socket namespace：`/ws`
 > 租户标识：`wgetcloud_live`　测试账号：`admin` / `agent01`（密码均为 `admin123456`）
 > 后端已通过 40 项自动化断言（见 `src/scripts/e2e-test.ts`），本文档聚焦前端视角的联调用例。
 
@@ -96,9 +96,9 @@
 ### 4.1 连接与鉴权
 ```js
 // 坐席
-io('http://localhost:3003/ws', { auth: { token: '<JWT>' } })          // 自动加入 tenant_agents_{tenant_id}
+io('http://localhost:3005/ws', { auth: { token: '<JWT>' } })          // 自动加入 tenant_agents_{tenant_id}
 // 访客
-io('http://localhost:3003/ws', { query: { token: visitorToken, conversation_id } })  // 自动加入 conv_{id}
+io('http://localhost:3005/ws', { query: { token: visitorToken, conversation_id } })  // 自动加入 conv_{id}
 ```
 - 用例 S1：坐席携带合法 JWT 连接成功；无效 token → `connect_error`（消息含 unauthorized）
 - 用例 S2：访客 token 与 conversation_id 归属校验失败 → `connect_error`；正确则连接成功
@@ -135,7 +135,7 @@ io('http://localhost:3003/ws', { query: { token: visitorToken, conversation_id }
 ## 6. 快速自检命令
 
 ```bash
-curl http://localhost:3003/api/v1/health                     # 服务/DB 状态
+curl http://localhost:3005/api/v1/health                     # 服务/DB 状态
 npx tsx src/scripts/e2e-test.ts                              # 后端全链路回归（40 断言）
 npm run seed                                                 # 重置种子数据（幂等）
 ```

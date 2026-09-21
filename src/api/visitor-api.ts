@@ -1,14 +1,17 @@
 import { MockApiService } from '../lib/mock/mock-api';
 import { realSocket, mapMessage, mapConversation } from '../lib/real/socket-service';
-import { upload as httpUpload, TENANT_KEY, getSharedVisitorToken } from './http';
+import { upload as httpUpload, getSharedVisitorToken, API_BASE, setActiveTenantKey, getActiveTenantKey, resolveAssetUrl } from './http';
 import { Conversation, ChatMessage, MessageType, OfflineMessagePayload, TenantConfig, AgentStatus } from '../types';
+import { AI_DEFAULT_AVATAR } from '../constants/avatars';
 import { IS_MOCK } from './index';
 
 export async function getTenantConfig(tenantCode: string): Promise<TenantConfig> {
   if (IS_MOCK) {
     return MockApiService.getTenantConfig(tenantCode);
   }
-  const data = await fetch(`/api/v1/widget/config`, {
+  // 记录挂件运行期实际租户：后续上传/拉消息请求的 X-Tenant-Key 都用它
+  setActiveTenantKey(tenantCode);
+  const data = await fetch(`${API_BASE}/widget/config`, {
     headers: { 'X-Tenant-Key': tenantCode },
   }).then((r) => r.json());
   if (data.code >= 400) throw new Error(data.message || '获取租户配置失败');
@@ -16,9 +19,10 @@ export async function getTenantConfig(tenantCode: string): Promise<TenantConfig>
   return {
     tenant_code: c.tenant_key || tenantCode,
     tenant_name: c.tenant_name || '在线客服',
+    brand_name: c.brand_name || undefined,
     theme_color: c.theme_color || '#1972f5',
     welcome_msg: c.welcome_msg || '',
-    default_avatar: c.brand_avatar || undefined,
+    default_avatar: resolveAssetUrl(c.brand_avatar) || AI_DEFAULT_AVATAR,
     work_start_time: c.business_hours?.start_time || '00:00',
     work_end_time: c.business_hours?.end_time || '23:59',
     enable_prechat_form: !!c.enable_prechat_form,
@@ -39,7 +43,8 @@ export async function initConversation(
   if (IS_MOCK) {
     return MockApiService.initConversation(visitorToken, tenantCode, visitorMeta);
   }
-  const data = await fetch(`/api/v1/widget/session/init`, {
+  setActiveTenantKey(tenantCode);
+  const data = await fetch(`${API_BASE}/widget/session/init`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -161,15 +166,16 @@ export async function sendVisitorMessage(
 
 export async function uploadFile(
   file: File,
-  opts?: { type?: 'text' | 'image' | 'file' | 'audio'; durationSeconds?: number }
+  opts?: { type?: 'text' | 'image' | 'file' | 'audio' | 'video'; durationSeconds?: number; visitorToken?: string }
 ): Promise<{ url: string; name: string; size: string; sizeBytes: number; type: string }> {
   if (IS_MOCK) {
     return MockApiService.uploadFile(file);
   }
   const isImage = file.type.startsWith('image/');
   const isAudio = file.type.startsWith('audio/') || file.type === 'audio/webm' || opts?.type === 'audio';
-  const type = opts?.type || (isImage ? 'image' : isAudio ? 'audio' : 'file');
-  const data = await httpUpload(file, type, opts?.durationSeconds);
+  const isVideo = file.type.startsWith('video/') || opts?.type === 'video';
+  const type = opts?.type || (isImage ? 'image' : isAudio ? 'audio' : isVideo ? 'video' : 'file');
+  const data = await httpUpload(file, type, opts?.durationSeconds, opts?.visitorToken);
   const size = data.file_size;
   const sizeNum = typeof size === 'number' ? size : parseInt(String(size), 10) || 0;
   const sizeStr =
@@ -189,7 +195,7 @@ export async function submitOfflineMessage(payload: OfflineMessagePayload): Prom
   if (IS_MOCK) {
     return MockApiService.submitOfflineMessage(payload);
   }
-  const data = await fetch(`/api/v1/widget/lead/offline`, {
+  const data = await fetch(`${API_BASE}/widget/lead/offline`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -211,10 +217,10 @@ export async function getVisitorMessages(conversationId: string): Promise<ChatMe
     return MockApiService.getMessages(conversationId);
   }
   const data = await fetch(
-    `/api/v1/widget/messages?conversation_id=${encodeURIComponent(conversationId)}&page=1&limit=50`,
+    `${API_BASE}/widget/messages?conversation_id=${encodeURIComponent(conversationId)}&page=1&limit=50`,
     {
       headers: {
-        'X-Tenant-Key': TENANT_KEY,
+        'X-Tenant-Key': getActiveTenantKey(),
         'X-Visitor-Token': getSharedVisitorToken(),
       },
     }
@@ -251,7 +257,7 @@ export async function submitPrechatForm(payload: {
   if (IS_MOCK) {
     return;
   }
-  const data = await fetch(`/api/v1/widget/prechat/submit`, {
+  const data = await fetch(`${API_BASE}/widget/prechat/submit`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -266,32 +272,6 @@ export async function submitPrechatForm(payload: {
     }),
   }).then((r) => r.json());
   if (data.code >= 400) throw new Error(data.message || '提交留资失败');
-}
-
-export async function rateConversation(payload: {
-  visitorToken: string;
-  tenantCode: string;
-  conversationId: string;
-  score: number;
-  feedback?: string;
-}): Promise<void> {
-  if (IS_MOCK) {
-    return;
-  }
-  const data = await fetch(`/api/v1/widget/session/rate`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Tenant-Key': payload.tenantCode,
-      'X-Visitor-Token': payload.visitorToken,
-    },
-    body: JSON.stringify({
-      conversation_id: payload.conversationId,
-      score: payload.score,
-      feedback: payload.feedback,
-    }),
-  }).then((r) => r.json());
-  if (data.code >= 400) throw new Error(data.message || '提交评价失败');
 }
 
 export { mapConversation };

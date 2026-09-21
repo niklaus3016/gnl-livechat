@@ -1,6 +1,6 @@
 const { io } = require('/home/devbox/project/node_modules/socket.io-client');
 
-const BASE = 'http://localhost:3000';
+const BASE = 'http://localhost:3005';
 const TOKEN = 'v_sock_' + Date.now();
 
 (async () => {

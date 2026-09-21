@@ -1,7 +1,19 @@
 import { MockApiService } from '../lib/mock/mock-api';
 import { realSocket, mapMessage, mapConversation } from '../lib/real/socket-service';
 import { mockWsBus } from '../lib/mock/mock-ws-bus';
-import { get, post, put, del, STORAGE_KEYS, ApiError } from './http';
+import {
+  get,
+  post,
+  put,
+  del,
+  ApiError,
+  API_BASE,
+  getActiveJwtRaw,
+  saveJwtForRole,
+  clearActiveJwt,
+  patchActiveJwtUser,
+  resolveAssetUrl,
+} from './http';
 import { AgentUser, ChatMessage, Conversation, JwtTokenPayload, MessageType, QuickReplyItem, TenantConfig, TenantItem } from '../types';
 import { IS_MOCK } from './index';
 
@@ -52,8 +64,10 @@ export async function loginAgent(account: string, pass: string): Promise<JwtToke
     username: account,
     password: pass,
   });
-  localStorage.setItem(STORAGE_KEYS.JWT, JSON.stringify({ token: data.token, user: data.user }));
-  return mapJwtPayload(data.user);
+  const payload = mapJwtPayload(data.user);
+  // 按角色写入专属 key：企业主 / 坐席 / 超管在同一浏览器登录互不覆盖
+  saveJwtForRole(payload.role, JSON.stringify({ token: data.token, user: data.user }));
+  return payload;
 }
 
 export function getCurrentAgentToken(): JwtTokenPayload | null {
@@ -61,7 +75,7 @@ export function getCurrentAgentToken(): JwtTokenPayload | null {
     return MockApiService.getAuthToken();
   }
   try {
-    const raw = localStorage.getItem(STORAGE_KEYS.JWT);
+    const raw = getActiveJwtRaw();
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (parsed?.token) {
@@ -104,20 +118,12 @@ export function updateStoredAgentProfile(partial: {
     }
     return;
   }
-  try {
-    const raw = localStorage.getItem(STORAGE_KEYS.JWT);
-    if (!raw) return;
-    const parsed = JSON.parse(raw);
-    if (parsed?.user) {
-      if (partial.avatar_url !== undefined) parsed.user.avatar_url = partial.avatar_url;
-      if (partial.display_name !== undefined) parsed.user.display_name = partial.display_name;
-      if (partial.title !== undefined) parsed.user.title = partial.title;
-      if (partial.bio !== undefined) parsed.user.bio = partial.bio;
-      localStorage.setItem(STORAGE_KEYS.JWT, JSON.stringify(parsed));
-    }
-  } catch {
-    /* ignore */
-  }
+  patchActiveJwtUser((user) => {
+    if (partial.avatar_url !== undefined) user.avatar_url = partial.avatar_url;
+    if (partial.display_name !== undefined) user.display_name = partial.display_name;
+    if (partial.title !== undefined) user.title = partial.title;
+    if (partial.bio !== undefined) user.bio = partial.bio;
+  });
 }
 
 export function logoutAgent(): void {
@@ -125,7 +131,7 @@ export function logoutAgent(): void {
     MockApiService.removeAuthToken();
     return;
   }
-  localStorage.removeItem(STORAGE_KEYS.JWT);
+  clearActiveJwt();
   realSocket.disconnectAgent();
 }
 
@@ -195,6 +201,7 @@ export async function sendAgentMessage(
     fileUrl?: string;
     fileName?: string;
     fileSize?: string;
+    fileSizeBytes?: number;
     voiceDuration?: number;
     isInternalNote?: boolean;
   }
@@ -215,7 +222,7 @@ export async function sendAgentMessage(
   const richPayload: Record<string, any> = {};
   if (payload.fileUrl) richPayload.file_url = payload.fileUrl;
   if (payload.fileName) richPayload.file_name = payload.fileName;
-  if (payload.fileSize) richPayload.file_size = payload.fileSize;
+  if (payload.fileSizeBytes !== undefined) richPayload.file_size = payload.fileSizeBytes;
   if (payload.voiceDuration !== undefined) richPayload.audio_duration = payload.voiceDuration;
 
   const ack = await realSocket.agentSendMessage(conversationId, {
@@ -259,14 +266,15 @@ export async function markAgentMessagesRead(conversationId: string): Promise<voi
 /** Agent file upload (POST /agent/upload, Bearer JWT + multipart). */
 export async function agentUploadFile(
   file: File,
-  opts?: { type?: 'text' | 'image' | 'file' | 'audio'; durationSeconds?: number }
-): Promise<{ url: string; name: string; size: string; type: string }> {
+  opts?: { type?: 'text' | 'image' | 'file' | 'audio' | 'video'; durationSeconds?: number }
+): Promise<{ url: string; name: string; size: string; sizeBytes: number; type: string }> {
   if (IS_MOCK) {
     return MockApiService.uploadFile(file);
   }
   const isImage = file.type.startsWith('image/');
   const isAudio = file.type.startsWith('audio/') || file.type === 'audio/webm' || opts?.type === 'audio';
-  const type = opts?.type || (isImage ? 'image' : isAudio ? 'audio' : 'file');
+  const isVideo = file.type.startsWith('video/') || opts?.type === 'video';
+  const type = opts?.type || (isImage ? 'image' : isAudio ? 'audio' : isVideo ? 'video' : 'file');
   const { getJwt, ApiError } = await import('./http');
   const jwt = getJwt();
   if (!jwt) throw new ApiError(401, '坐席未登录，无法上传文件');
@@ -274,7 +282,7 @@ export async function agentUploadFile(
   formData.append('file', file);
   formData.append('type', type);
   if (opts?.durationSeconds !== undefined) formData.append('duration', String(opts.durationSeconds));
-  const res = await fetch(`/api/v1/agent/upload`, {
+  const res = await fetch(`${API_BASE}/agent/upload`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${jwt}` },
     body: formData,
@@ -282,16 +290,18 @@ export async function agentUploadFile(
   const data = await res.json().catch(() => ({}));
   if (data.code >= 400) throw new ApiError(data.code, data.message || '上传失败');
   const size = data.data?.file_size;
+  const sizeBytes = typeof size === 'number' ? size : Number(size) || file.size;
   const sizeStr =
-    typeof size === 'number'
-      ? size > 1024 * 1024
-        ? `${(size / 1024 / 1024).toFixed(1)} MB`
-        : `${Math.max(1, Math.round(size / 1024))} KB`
+    typeof sizeBytes === 'number'
+      ? sizeBytes > 1024 * 1024
+        ? `${(sizeBytes / 1024 / 1024).toFixed(1)} MB`
+        : `${Math.max(1, Math.round(sizeBytes / 1024))} KB`
       : String(size ?? '');
   return {
     url: data.data?.file_url,
     name: data.data?.file_name || file.name,
     size: sizeStr,
+    sizeBytes,
     type: data.data?.type,
   };
 }
@@ -336,14 +346,6 @@ export async function closeConversation(conversationId: string): Promise<Convers
   await post<any>(`/conversations/${conversationId}/close`, { summary: '', tags: [] }, { auth: true });
   const conv = await getConversationDetail(conversationId).catch(() => null);
   return { ...(conv || ({ id: conversationId } as Conversation)), status: 'closed' };
-}
-
-export async function reopenConversation(conversationId: string): Promise<Conversation> {
-  if (IS_MOCK) {
-    return MockApiService.reopenConversation(conversationId);
-  }
-  // No backend endpoint yet
-  throw new ApiError(404, '后端暂不支持重新开启会话');
 }
 
 /** Permanently delete a (closed) conversation and all of its messages. */
@@ -457,16 +459,9 @@ export async function updateAgentProfile(payload: {
   if (Object.keys(body).length) {
     const data = await put<any>(`/agent/profile`, body, { auth: true });
     // 同步刷新本地缓存的 JWT user（顶栏昵称/头像即时生效）
-    const raw = localStorage.getItem(STORAGE_KEYS.JWT);
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw);
-        parsed.user = { ...parsed.user, ...data };
-        localStorage.setItem(STORAGE_KEYS.JWT, JSON.stringify(parsed));
-      } catch {
-        /* ignore */
-      }
-    }
+    patchActiveJwtUser((user) => {
+      Object.assign(user, data);
+    });
     return mapBackendUser(data);
   }
 
@@ -548,9 +543,10 @@ function mapTenantConfig(c: any): TenantConfig {
   return {
     tenant_code: c.tenant_key || 'wgetcloud_live',
     tenant_name: c.tenant_name || '',
+    brand_name: c.brand_name || undefined,
     theme_color: c.theme_color || '#1972f5',
     welcome_msg: c.welcome_msg || '',
-    default_avatar: c.brand_avatar || undefined,
+    default_avatar: resolveAssetUrl(c.brand_avatar) || undefined,
     work_start_time: c.business_hours?.start_time || '09:00',
     work_end_time: c.business_hours?.end_time || '18:00',
     enable_prechat_form: !!c.enable_prechat_form,
@@ -595,10 +591,11 @@ export async function updateTenantSetting(payload: Partial<TenantConfig>): Promi
   if (IS_MOCK) {
     return MockApiService.updateTenantSetting(payload);
   }
-  // Backend PUT whitelist: theme_color / welcome_msg / guide_options /
+  // Backend PUT whitelist: brand_name / theme_color / welcome_msg / guide_options /
   // enable_guide_options / enable_prechat_form / widget_position / business_hours
+  // 注意：tenant_name（注册名）企业主不可改，仅超管可编辑
   const body: Record<string, any> = {};
-  if (payload.tenant_name !== undefined) body.tenant_name = payload.tenant_name;
+  if (payload.brand_name !== undefined) body.brand_name = payload.brand_name;
   if (payload.theme_color && /^#[0-9a-fA-F]{6}$/.test(payload.theme_color)) body.theme_color = payload.theme_color;
   if (payload.welcome_msg !== undefined) body.welcome_msg = payload.welcome_msg;
   if (payload.guide_options) body.guide_options = payload.guide_options;
@@ -769,6 +766,7 @@ function mapPlatformTenant(t: any): TenantItem {
     activeChatsCount: t.conversation_count ?? 0,
     totalMessagesCount: t.conversation_count ?? 0,
     adminEmail: t.admin_email || '',
+    adminUsername: t.admin_username || '',
     createdAt: t.created_at || '',
     expireAt: t.expires_at ? String(t.expires_at).slice(0, 10) : '—',
     ownerName: t.owner_name || '',
@@ -853,14 +851,35 @@ export async function renewPlatformTenant(
   return mapPlatformTenant(data);
 }
 
-export async function updatePlatformTenant(id: string, payload: Partial<TenantItem>): Promise<TenantItem> {
+export async function updatePlatformTenant(
+  id: string,
+  payload: {
+    status?: 'active' | 'suspended' | 'trial';
+    /** 企业全称（后端 tenant_name，仅超管可改） */
+    name?: string;
+    adminEmail?: string;
+    ownerName?: string;
+    ownerContact?: string;
+    maxSeats?: number;
+    /** 服务到期日 YYYY-MM-DD（'—' = 不限期） */
+    expireAt?: string;
+    /** 重置企业主登录密码（≥6 位，映射后端 admin_password；需后端 PUT /platform/tenants/:id 接收） */
+    newPassword?: string;
+  }
+): Promise<TenantItem> {
   if (IS_MOCK) {
-    return MockApiService.updatePlatformTenant(id, payload);
+    const mockPayload: Partial<TenantItem> = { ...payload };
+    return MockApiService.updatePlatformTenant(id, mockPayload);
   }
   const body: Record<string, any> = {};
   if (payload.status !== undefined) body.status = payload.status === 'active' ? 'enabled' : 'disabled';
+  if (payload.name !== undefined) body.tenant_name = payload.name;
+  if (payload.adminEmail !== undefined) body.admin_email = payload.adminEmail;
+  if (payload.ownerName !== undefined) body.owner_name = payload.ownerName;
+  if (payload.ownerContact !== undefined) body.owner_contact = payload.ownerContact;
   if (payload.maxSeats !== undefined) body.max_agents = payload.maxSeats;
   if (payload.expireAt !== undefined) body.expires_at = payload.expireAt === '—' ? null : payload.expireAt;
+  if (payload.newPassword) body.admin_password = payload.newPassword;
   const data = await put<any>(`/platform/tenants/${id}`, body, { auth: true });
   return mapPlatformTenant(data);
 }

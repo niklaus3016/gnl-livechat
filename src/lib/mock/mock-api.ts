@@ -324,8 +324,8 @@ export class MockApiService {
       try {
         previewUrl = URL.createObjectURL(file);
       } catch {
-        previewUrl = isVideo 
-          ? 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4'
+        previewUrl = isVideo
+          ? 'https://www.w3schools.com/html/mov_bbb.mp4'
           : 'https://images.unsplash.com/photo-1579546929518-9e396f3cc809?w=600&auto=format&fit=crop&q=80';
       }
     } else {
@@ -394,7 +394,7 @@ export class MockApiService {
       if (!c.channel) {
         const init = INITIAL_CONVERSATIONS.find((ic) => ic.id === c.id);
         c.channel = init?.channel || 'web';
-        c.channelAccount = init?.channelAccount || 'Web 官网在线挂件';
+        c.channelAccount = init?.channelAccount || 'Web 在线挂件';
         updated = true;
       }
     });
@@ -507,14 +507,6 @@ export class MockApiService {
 
     conv.status = 'closed';
     setStored(STORAGE_KEYS.CONVERSATIONS, convList);
-
-    // Send system notice
-    await this.sendMessage(conversationId, {
-      senderType: 'system',
-      senderId: 'system',
-      senderName: '系统通知',
-      content: '客服已结束本次会话。如需进一步协助，欢迎随时发起新咨询。',
-    });
 
     mockWsBus.send('conversation_status', { conversationId, status: 'closed' });
 

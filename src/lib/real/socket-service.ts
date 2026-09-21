@@ -15,9 +15,10 @@
 import { io, Socket } from 'socket.io-client';
 import { mockWsBus } from '../mock/mock-ws-bus';
 import { ChatMessage, Conversation } from '../../types';
-import { getJwt } from '../../api/http';
+import { getJwt, API_ORIGIN } from '../../api/http';
 
-const SOCKET_BASE = `${window.location.protocol}//${window.location.host}`;
+// 同源部署用当前域名；前端独立域名部署（VITE_API_BASE_URL）时连后端公网地址
+const SOCKET_BASE = API_ORIGIN || `${window.location.protocol}//${window.location.host}`;
 
 export type AgentRole = 'visitor' | 'agent';
 

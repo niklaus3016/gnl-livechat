@@ -17,20 +17,22 @@ export default defineConfig(() => {
       hmr: process.env.DISABLE_HMR !== 'true',
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
-      // 允许集群内主机名访问（自动化浏览器经 livechat-qd.ns-tlwyfho9:3001 访问本服务）
+      // 允许集群内主机名访问（自动化浏览器经 livechat-qd.ns-tlwyfho9:3005 访问本服务）
       allowedHosts: ['livechat-qd.ns-tlwyfho9', 'livechat-qd.ns-tlwyfho9.svc.cluster.local'],
       proxy: {
-        // 后端内网服务（浏览器只访问同源，由 dev server 代理转发）
+        // 本地 dev 统一走生产公网后端（2026-09-20 后端容器重建后内网 livechat-hd:3005
+        // 已 ECONNREFUSED，公网域名经 Sealos 网关始终可达，本地开发不再依赖内网拓扑）。
+        // 若后端恢复内网直连，把 target 换回 http://livechat-hd.ns-tlwyfho9:<端口> 即可。
         '/api': {
-          target: 'http://livechat-hd.ns-tlwyfho9:3003',
+          target: 'https://dzdqdodqktpq.sealoshzh.site',
           changeOrigin: true,
         },
         '/uploads': {
-          target: 'http://livechat-hd.ns-tlwyfho9:3003',
+          target: 'https://dzdqdodqktpq.sealoshzh.site',
           changeOrigin: true,
         },
         '/socket.io': {
-          target: 'http://livechat-hd.ns-tlwyfho9:3003',
+          target: 'https://dzdqdodqktpq.sealoshzh.site',
           changeOrigin: true,
           ws: true,
         },

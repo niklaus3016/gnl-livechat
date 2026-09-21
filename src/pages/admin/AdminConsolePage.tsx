@@ -21,10 +21,7 @@ import {
 import { AgentUser, Role, TenantConfig, TenantItem } from '../../types';
 import { AnalyticsDashboardView } from '../../components/admin/AnalyticsDashboardView';
 import { ConversationMonitorView } from '../../components/admin/ConversationMonitorView';
-
-// 默认机器人头像（访客未分配坐席、由 AI 接待时展示的企业统一形象）
-const AI_DEFAULT_AVATAR =
-  'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=150&auto=format&fit=crop&q=80';
+import { AI_DEFAULT_AVATAR } from '../../constants/avatars';
 
 /** 日期格式化为本地 YYYY-MM-DD（date input 用，避免 toISOString 的 UTC 错位） */
 function fmtLocalDate(d: Date): string {
@@ -103,7 +100,7 @@ export const AdminConsolePage: React.FC = () => {
 
   // Navigation tab
   const [superAdminTab, setSuperAdminTab] = useState<'tenants' | 'metrics' | 'global_settings'>('tenants');
-  const [tenantAdminTab, setTenantAdminTab] = useState<'analytics' | 'widget' | 'agents' | 'conversations' | 'hours' | 'embed'>('conversations');
+  const [tenantAdminTab, setTenantAdminTab] = useState<'analytics' | 'widget' | 'agents' | 'conversations' | 'hours' | 'embed' | 'password'>('conversations');
   const [previewWidgetMode, setPreviewWidgetMode] = useState<'chat' | 'prechat' | 'minimized'>('chat');
   const [previewPersona, setPreviewPersona] = useState<'bot' | 'agent'>('bot');
   const [editingAgent, setEditingAgent] = useState<AgentUser | null>(null);
@@ -171,12 +168,27 @@ export const AdminConsolePage: React.FC = () => {
   /** 续费顺延基准日（YYYY-MM-DD）：未到期取当前到期日，否则取今天；快捷按钮始终基于它计算 */
   const [renewBase, setRenewBase] = useState('');
 
+  // 编辑企业租户（超管）：企业信息可改，登录账号只读，密码选填重置
+  const [editingTenant, setEditingTenant] = useState<TenantItem | null>(null);
+  const [editTenantData, setEditTenantData] = useState({
+    name: '',
+    adminEmail: '',
+    ownerName: '',
+    ownerContact: '',
+    maxSeats: 5,
+    expireAt: '',
+    newPassword: '',
+    confirmPassword: '',
+  });
+
   // 修改登录密码（企业主）
   const [pwdData, setPwdData] = useState({ old: '', next: '', confirm: '' });
   const [pwdSaving, setPwdSaving] = useState(false);
 
   // Tenant Admin state
   const [tenantConfig, setTenantConfig] = useState<TenantConfig | null>(null);
+  // 预览用展示名：优先品牌名称（访客端展示），回退注册名——与真实访客端 ChatPage 口径一致
+  const previewBrandName = tenantConfig ? (tenantConfig.brand_name || tenantConfig.tenant_name || '光年跃迁') : '光年跃迁';
   const [tenantAgents, setTenantAgents] = useState<AgentUser[]>([]);
   const [showAddAgentModal, setShowAddAgentModal] = useState(false);
   const [newAgentData, setNewAgentData] = useState({
@@ -362,6 +374,61 @@ export const AdminConsolePage: React.FC = () => {
       alert(err.message || '修改失败');
     } finally {
       setPwdSaving(false);
+    }
+  };
+
+  // 打开编辑企业租户弹窗：回填当前资料，登录账号只读展示
+  const openEditModal = (t: TenantItem) => {
+    setEditTenantData({
+      name: t.name || '',
+      adminEmail: t.adminEmail || '',
+      ownerName: t.ownerName || '',
+      ownerContact: t.ownerContact || '',
+      maxSeats: t.maxSeats || 5,
+      expireAt: t.expireAt && t.expireAt !== '—' ? t.expireAt : '',
+      newPassword: '',
+      confirmPassword: '',
+    });
+    setEditingTenant(t);
+  };
+
+  // 提交编辑：保存企业信息 + 选填重置企业主登录密码
+  const handleEditTenant = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingTenant) return;
+    if (!editTenantData.name.trim()) {
+      alert('请填写企业全称');
+      return;
+    }
+    if (editTenantData.newPassword || editTenantData.confirmPassword) {
+      if (editTenantData.newPassword.length < 6) {
+        alert('新密码至少 6 位');
+        return;
+      }
+      if (editTenantData.newPassword !== editTenantData.confirmPassword) {
+        alert('两次输入的新密码不一致');
+        return;
+      }
+    }
+    try {
+      await updatePlatformTenant(editingTenant.id, {
+        name: editTenantData.name.trim(),
+        adminEmail: editTenantData.adminEmail,
+        ownerName: editTenantData.ownerName,
+        ownerContact: editTenantData.ownerContact,
+        maxSeats: editTenantData.maxSeats,
+        expireAt: editTenantData.expireAt || '—',
+        newPassword: editTenantData.newPassword || undefined,
+      });
+      showToast(
+        editTenantData.newPassword
+          ? `已保存企业【${editTenantData.name.trim()}】的资料，登录密码已重置，请转告企业主`
+          : `已保存企业【${editTenantData.name.trim()}】的资料`
+      );
+      setEditingTenant(null);
+      fetchSuperAdminData();
+    } catch (err: any) {
+      alert(err.message || '保存失败');
     }
   };
 
@@ -568,12 +635,9 @@ export const AdminConsolePage: React.FC = () => {
                       )}
                     </div>
                     <div className="min-w-0">
-                      <h2 className="font-bold text-sm text-white leading-tight tracking-tight truncate">
+                      <h2 className="font-bold text-lg text-white leading-tight tracking-tight truncate">
                         {activeRole === 'super_admin' ? '全网运营控制台' : '企业管理中心'}
                       </h2>
-                      <p className="text-xs text-slate-400 mt-0.5 truncate">
-                        {activeRole === 'super_admin' ? '平台多租户治理中心' : '光年跃迁租户系统'}
-                      </p>
                     </div>
                   </div>
 
@@ -616,46 +680,40 @@ export const AdminConsolePage: React.FC = () => {
               )}
             </div>
 
-            {/* 当前登录用户卡片（真实 JWT 身份；展开态显示资料，收起态显示首字） */}
+            {/* 当前登录用户卡片（真实 JWT 身份；企业主=纯文本昵称+账号，超管=首字+标签+@账号） */}
             {isExpanded ? (
               <div className="mx-3 mt-3 p-3 rounded-xl bg-slate-800/60 border border-slate-700/70 flex items-center gap-2.5 min-w-0">
-                <div
-                  className={`w-9 h-9 rounded-lg flex items-center justify-center text-white text-sm font-bold shrink-0 ${
-                    activeRole === 'super_admin' ? 'bg-blue-600' : 'bg-indigo-600'
-                  }`}
-                >
-                  {(currentUser?.nickname || currentUser?.account || '管').trim().charAt(0)}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="text-xs font-semibold text-white truncate">
-                    {currentUser?.nickname || currentUser?.account || '管理员'}
+                {activeRole === 'super_admin' && (
+                  <div className="w-9 h-9 rounded-lg flex items-center justify-center text-white text-sm font-bold shrink-0 bg-blue-600">
+                    {(currentUser?.nickname || currentUser?.account || '管').trim().charAt(0)}
                   </div>
-                  <div className="flex items-center gap-1.5 mt-0.5">
-                    <span
-                      className={`text-[10px] px-1.5 py-px rounded font-medium ${
-                        activeRole === 'super_admin'
-                          ? 'bg-blue-500/15 text-blue-300'
-                          : 'bg-indigo-500/15 text-indigo-300'
-                      }`}
-                    >
-                      {activeRole === 'super_admin' ? '平台超管' : '企业主'}
+                )}
+                <div className={`min-w-0 flex-1 ${activeRole !== 'super_admin' ? 'text-center' : ''}`}>
+                  <div className="text-sm font-semibold text-white truncate">
+                    {(currentUser?.nickname || '').replace(/管理员$/, '').trim() || currentUser?.account || '管理员'}
+                  </div>
+                  <div className={`flex items-center gap-1.5 mt-1 ${activeRole !== 'super_admin' ? 'justify-center' : ''}`}>
+                    {activeRole === 'super_admin' && (
+                      <span className="text-[10px] px-1.5 py-px rounded font-medium bg-blue-500/15 text-blue-300">
+                        平台超管
+                      </span>
+                    )}
+                    <span className="text-xs text-slate-400 truncate">
+                      {activeRole === 'super_admin' ? `@${currentUser?.account}` : currentUser?.account}
                     </span>
-                    <span className="text-[10px] text-slate-400 truncate">@{currentUser?.account}</span>
                   </div>
                 </div>
               </div>
-            ) : (
+            ) : activeRole === 'super_admin' ? (
               <div className="flex justify-center mt-3 shrink-0">
                 <div
-                  className={`w-9 h-9 rounded-lg flex items-center justify-center text-white text-sm font-bold ${
-                    activeRole === 'super_admin' ? 'bg-blue-600' : 'bg-indigo-600'
-                  }`}
+                  className="w-9 h-9 rounded-lg flex items-center justify-center text-white text-sm font-bold bg-blue-600"
                   title={`${currentUser?.nickname || ''} @${currentUser?.account || ''}`}
                 >
                   {(currentUser?.nickname || currentUser?.account || '管').trim().charAt(0)}
                 </div>
               </div>
-            )}
+            ) : null}
 
             {/* Role Navigation Menu (Larger Font, Spacious Layout like reference) */}
             <div className="flex-1 min-h-0 overflow-y-auto py-3 px-2 space-y-1">
@@ -906,19 +964,21 @@ export const AdminConsolePage: React.FC = () => {
                   {(() => {
                     const exp = tenantConfig?.expires_at || '';
                     const st = expireState(exp);
+                    // 侧边栏口径：仅提前 7 天变琥珀提醒，其余正常/不限期均为绿色
+                    const soon = st.kind === 'soon' && st.days <= 7;
                     const color =
                       st.kind === 'expired'
                         ? 'text-red-400'
-                        : st.kind === 'soon'
+                        : soon
                         ? 'text-amber-400'
-                        : 'text-slate-200';
+                        : 'text-emerald-400';
                     if (!isExpanded) {
                       return (
                         <span
                           className={`w-2 h-2 rounded-full ${
                             st.kind === 'expired'
                               ? 'bg-red-500'
-                              : st.kind === 'soon'
+                              : soon
                               ? 'bg-amber-500'
                               : 'bg-emerald-500'
                           }`}
@@ -926,17 +986,17 @@ export const AdminConsolePage: React.FC = () => {
                       );
                     }
                     return (
-                      <>
-                        <div className="text-[11px] text-slate-500 mb-0.5 flex items-center gap-1.5">
-                          <Clock className="w-3 h-3" />
-                          订阅有效期
-                        </div>
-                        <div className={`text-[11px] text-center ${color}`}>
+                      <div className="text-[11px] flex items-center gap-1.5 min-w-0">
+                        <Clock className="w-3 h-3 shrink-0 text-slate-500" />
+                        <span className="text-slate-500 shrink-0">
+                          订阅有效期{st.kind === 'none' ? '：' : '至：'}
+                        </span>
+                        <span className={`truncate ${color}`}>
                           {st.kind === 'none' ? (
                             '不限期'
                           ) : st.kind === 'expired' ? (
-                            <>已过期 · {exp}</>
-                          ) : st.kind === 'soon' ? (
+                            <>{exp}（已过期）</>
+                          ) : soon ? (
                             <>
                               {exp}
                               <span className="text-[10.5px] font-normal ml-1">({st.days} 天后到期)</span>
@@ -944,8 +1004,8 @@ export const AdminConsolePage: React.FC = () => {
                           ) : (
                             exp
                           )}
-                        </div>
-                      </>
+                        </span>
+                      </div>
                     );
                   })()}
                 </div>
@@ -1162,6 +1222,13 @@ export const AdminConsolePage: React.FC = () => {
                                 >
                                   {t.status === 'active' ? '停用' : '激活'}
                                 </button>
+                                <button
+                                  type="button"
+                                  onClick={() => openEditModal(t)}
+                                  className="px-2.5 py-1 rounded-lg text-xs font-medium transition cursor-pointer bg-slate-500/10 text-slate-300 hover:bg-slate-500/20 border border-slate-500/30"
+                                >
+                                  编辑
+                                </button>
                               </div>
                             </td>
                           </tr>
@@ -1323,7 +1390,7 @@ export const AdminConsolePage: React.FC = () => {
                           <span>访客端聊天小部件外观与交互定制</span>
                         </h2>
                         <p className="text-xs text-slate-400 mt-1">
-                          实时定制嵌入在您企业官方网站上的悬浮客服组件视觉风格、主动问候时机与交互策略
+                          实时定制嵌入在网站和应用上的悬浮客服组件视觉风格、主动问候时机与交互策略
                         </p>
                       </div>
 
@@ -1337,13 +1404,13 @@ export const AdminConsolePage: React.FC = () => {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                           {/* Brand/Bot Name */}
                           <div>
-                            <label className="block text-xs font-semibold text-slate-300 mb-1.5">品牌名称/公司简称</label>
+                            <label className="block text-xs font-semibold text-slate-300 mb-1.5">品牌名称/公司简称（访客端展示）</label>
                             <input
                               type="text"
-                              value={tenantConfig.tenant_name}
-                              onChange={(e) => setTenantConfig({ ...tenantConfig, tenant_name: e.target.value })}
+                              value={tenantConfig.brand_name || tenantConfig.tenant_name}
+                              onChange={(e) => setTenantConfig({ ...tenantConfig, brand_name: e.target.value })}
                               className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-xs text-white focus:outline-none focus:border-indigo-500"
-                              placeholder="例如：James 来自光年跃迁"
+                              placeholder="例如：丰佰瑞科技"
                             />
                           </div>
 
@@ -1386,9 +1453,6 @@ export const AdminConsolePage: React.FC = () => {
                           <div className="flex items-center justify-between mb-2">
                             <label className="text-xs font-semibold text-slate-300 flex items-center gap-2">
                               <span>企业通用默认接待 / AI 机器人头像 (全局兜底)</span>
-                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-normal">
-                                企业通用
-                              </span>
                             </label>
                           </div>
                           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
@@ -1477,7 +1541,6 @@ export const AdminConsolePage: React.FC = () => {
                         <div>
                           <div className="flex items-center justify-between mb-1.5">
                             <label className="text-xs font-semibold text-slate-300">访客首句问候语 (欢迎接待词)</label>
-                            <span className="text-[11px] text-slate-500">支持自动解析多行</span>
                           </div>
                           <textarea
                             rows={4}
@@ -1790,32 +1853,16 @@ export const AdminConsolePage: React.FC = () => {
                       </div>
 
                       {/* Finalized Visitor Chat Widget Container (Exact 1:1 Replica, Taller & Roomier) */}
-                      {previewWidgetMode === 'minimized' ? (
-                        /* 最小化态：在预览区内右下角展示悬浮头像，点击展开（不跳到独立演示页） */
-                        <div className="w-full max-w-98.75 mx-auto relative bg-slate-900/40 rounded-2xl border border-slate-700/70 min-h-145 my-2">
-                          <div className="absolute top-4 left-4 text-xs text-slate-400">
-                            <p className="font-semibold text-slate-300">网页{widgetPosition === 'right' ? '右下角' : '左下角'}折叠挂件状态</p>
-                            <p className="text-[11px] text-slate-500 mt-0.5">访客未展开或点击「—」最小化时展示悬浮头像</p>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => setPreviewWidgetMode('chat')}
-                            className={`absolute ${widgetPosition === 'right' ? 'bottom-5 right-5' : 'bottom-5 left-5'} w-14 h-14 rounded-full bg-white border-2 border-white shadow-[0_8px_24px_rgba(0,0,0,0.22)] flex items-center justify-center hover:scale-105 transition active:scale-95 cursor-pointer`}
-                            title="点击展开会话窗口"
-                          >
-                            <img
-                              src={selectedAvatar}
-                              alt="在线客服"
-                              className="w-full h-full rounded-full object-cover"
-                            />
-                            <span className="absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full bg-[#00c853] border-2 border-white shadow-xs" />
-                          </button>
+                      {/* 展开/折叠共用同一布局骨架：折叠时聊天窗向底部头像方向缩放淡出，高度恒定页面不晃动 */}
+                      <div className="w-full max-w-98.75 mx-auto space-y-2 relative">
+                        {/* 折叠态底板 + 提示（纯覆盖层不参与布局，避免高度跳变） */}
+                        <div className={`absolute inset-0 z-0 rounded-2xl bg-slate-900/40 border border-slate-700/70 transition-opacity duration-300 ease-out ${previewWidgetMode === 'minimized' ? 'opacity-100' : 'opacity-0 pointer-events-none'}`} />
+                        <div className={`absolute top-4 left-4 z-10 text-xs text-slate-400 transition-all duration-300 ease-out ${previewWidgetMode === 'minimized' ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-1 pointer-events-none'}`}>
+                          <p className="font-semibold text-slate-300">网页{widgetPosition === 'right' ? '右下角' : '左下角'}折叠挂件状态</p>
+                          <p className="text-[11px] text-slate-500 mt-0.5">访客未展开或点击「—」最小化时展示悬浮头像</p>
                         </div>
-                      ) : (
-                        /* Expanded Chat Dialog Container (660px Height Matching widget.js & ChatPage 1:1) */
-                        <div className="w-full max-w-98.75 mx-auto space-y-2">
                           {/* Preview Persona Switcher */}
-                          <div className="flex items-center gap-1 bg-slate-900/90 p-1 rounded-xl border border-slate-700/60 shadow-xs">
+                          <div className={`relative z-10 flex items-center gap-1 bg-slate-900/90 p-1 rounded-xl border border-slate-700/60 shadow-xs transition-all duration-300 ease-out ${previewWidgetMode === 'minimized' ? 'opacity-0 -translate-y-1 scale-[0.98] pointer-events-none' : 'opacity-100'}`}>
                             <button
                               type="button"
                               onClick={() => setPreviewPersona('bot')}
@@ -1840,10 +1887,13 @@ export const AdminConsolePage: React.FC = () => {
                             </button>
                           </div>
 
-                          <div className="bg-white rounded-3xl shadow-[0_20px_60px_-10px_rgba(0,0,0,0.24),0_0_0_1px_rgba(0,0,0,0.06)] overflow-hidden flex flex-col text-slate-800 border border-slate-200/80 min-h-160">
+                          <div
+                            className={`relative z-10 bg-white rounded-3xl shadow-[0_20px_60px_-10px_rgba(0,0,0,0.24),0_0_0_1px_rgba(0,0,0,0.06)] overflow-hidden flex flex-col text-slate-800 border border-slate-200/80 min-h-160 transition-all duration-300 ease-out ${previewWidgetMode === 'minimized' ? 'opacity-0 scale-[0.82] translate-y-12 pointer-events-none' : 'opacity-100 scale-100 translate-y-0'}`}
+                            style={{ transformOrigin: widgetPosition === 'right' ? '100% 100%' : '0% 100%' }}
+                          >
                             {/* 1. Finalized ChatHeader */}
                             <ChatHeader
-                              tenantName={tenantConfig.tenant_name || '光年跃迁'}
+                              tenantName={previewBrandName}
                               themeColor={tenantConfig.theme_color || '#1972f5'}
                               agentName={previewPersona === 'agent' ? '小布丁' : 'AI 助手'}
                               agentAvatar={
@@ -1854,7 +1904,7 @@ export const AdminConsolePage: React.FC = () => {
                               agentTitle={previewPersona === 'agent' ? '在线技术支持' : '智能在线客服'}
                               agentBio={
                                 previewPersona === 'agent'
-                                  ? `欢迎咨询 ${tenantConfig.tenant_name || '光年跃迁'}，我们将竭诚为您解答产品、计费与系统对接相关疑问。`
+                                  ? `欢迎咨询 ${previewBrandName}，我们将竭诚为您解答产品、计费与系统对接相关疑问。`
                                   : `您好！我是企业智能客服助手，7x24 小时随时为您解答常见问题，如需人工支持可随时发起转接。`
                               }
                               isWorkingHours={true}
@@ -1886,7 +1936,7 @@ export const AdminConsolePage: React.FC = () => {
                                         ? '/avatars/agent-male.png'
                                         : selectedAvatar
                                     }
-                                    alt={tenantConfig.tenant_name || '光年跃迁'}
+                                    alt={previewBrandName}
                                     className="w-8 h-8 rounded-full object-cover border border-slate-200 shadow-xs shrink-0"
                                   />
                                   <div className="flex-1 min-w-0 max-w-[85%]">
@@ -1896,7 +1946,7 @@ export const AdminConsolePage: React.FC = () => {
                                       </span>
                                     </div>
                                     <div className="bg-white p-3.5 rounded-2xl border border-slate-200/90 shadow-2xs text-slate-800 leading-relaxed text-[13px]">
-                                      {tenantConfig.welcome_msg || '您好！欢迎咨询光年跃迁，我们随时为您提供专业的产品与技术支持。请问有什么可以帮您？'}
+                                      {tenantConfig.welcome_msg || `您好！欢迎咨询${previewBrandName}，我们随时为您提供专业的产品与技术支持。请问有什么可以帮您？`}
                                     </div>
 
                                   {/* Suggested Quick Reply Chips */}
@@ -1958,13 +2008,6 @@ export const AdminConsolePage: React.FC = () => {
                                   已收到您的语音咨询！专属技术客服顾问已就绪，请随时交流。
                                 </div>
                               </div>
-
-                              {/* Reassurance pill */}
-                              <div className="flex justify-center pt-1">
-                                <span className="text-[10.5px] text-slate-400 bg-white border border-slate-200/80 px-2.5 py-0.5 rounded-full shadow-2xs">
-                                  企业级会话已建立 · 实时加密保障
-                                </span>
-                              </div>
                             </div>
                           )}
 
@@ -2013,12 +2056,12 @@ export const AdminConsolePage: React.FC = () => {
                         </div>
 
                         {/* Floating Launcher Avatar OUTSIDE the conversation window at bottom-right */}
-                        <div className="flex items-center justify-end pr-1 pt-2">
+                        <div className="relative z-10 flex items-center justify-end pr-1 pt-2">
                           <button
                             type="button"
-                            onClick={() => setPreviewWidgetMode('minimized')}
+                            onClick={() => setPreviewWidgetMode(previewWidgetMode === 'minimized' ? 'chat' : 'minimized')}
                             className="w-13 h-13 rounded-full bg-white border-2 border-white shadow-[0_8px_24px_rgba(0,0,0,0.28)] flex items-center justify-center relative hover:scale-105 active:scale-95 transition cursor-pointer group"
-                            title="点击收起会话窗口 (右下角挂件)"
+                            title={previewWidgetMode === 'minimized' ? '点击展开会话窗口' : '点击收起会话窗口 (右下角挂件)'}
                           >
                             <img
                               src={selectedAvatar}
@@ -2029,7 +2072,6 @@ export const AdminConsolePage: React.FC = () => {
                           </button>
                         </div>
                       </div>
-                    )}
                     </div>
                   </div>
                 </div>
@@ -2579,6 +2621,154 @@ export const AdminConsolePage: React.FC = () => {
                 className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white transition shadow-md shadow-blue-500/20"
               >
                 确认续费
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Modal: Edit Platform Tenant (Super Admin Only) */}
+      {editingTenant && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <form
+            onSubmit={handleEditTenant}
+            className="max-w-md w-full bg-slate-900 border border-slate-700 rounded-2xl p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto"
+          >
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <Building2 className="w-4 h-4 text-blue-400" />
+                <span>编辑企业租户</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setEditingTenant(null)}
+                className="text-slate-400 hover:text-white cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="text-xs text-slate-400 bg-slate-800/60 border border-slate-800 rounded-xl px-3.5 py-2.5">
+              租户标识 <span className="font-mono text-slate-200">{editingTenant.tenantCode}</span>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">企业全称</label>
+              <input
+                type="text"
+                required
+                value={editTenantData.name}
+                onChange={(e) => setEditTenantData({ ...editTenantData, name: e.target.value })}
+                placeholder="例如：极光跃动科技有限公司"
+                className="w-full px-3.5 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">管理员联系邮箱（选填）</label>
+              <input
+                type="email"
+                value={editTenantData.adminEmail}
+                onChange={(e) => setEditTenantData({ ...editTenantData, adminEmail: e.target.value })}
+                placeholder="例如：boss@company.com"
+                className="w-full px-3.5 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">公司负责人（选填）</label>
+                <input
+                  type="text"
+                  value={editTenantData.ownerName}
+                  onChange={(e) => setEditTenantData({ ...editTenantData, ownerName: e.target.value })}
+                  placeholder="例如：张经理"
+                  className="w-full px-3.5 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">负责人联系方式（选填）</label>
+                <input
+                  type="text"
+                  value={editTenantData.ownerContact}
+                  onChange={(e) => setEditTenantData({ ...editTenantData, ownerContact: e.target.value })}
+                  placeholder="手机 / 微信 / 邮箱"
+                  className="w-full px-3.5 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">企业主登录账号（不可修改）</label>
+              <input
+                type="text"
+                disabled
+                value={editingTenant.adminUsername || '—'}
+                className="w-full px-3.5 py-2 bg-slate-800/50 border border-slate-700 rounded-xl text-xs text-slate-400 cursor-not-allowed"
+              />
+            </div>
+
+            <div className="bg-slate-800/40 border border-slate-800 rounded-xl p-3.5 space-y-3">
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-300">
+                <Key className="w-3.5 h-3.5 text-slate-400" />
+                <span>重置登录密码（选填，留空 = 不修改）</span>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <input
+                  type="text"
+                  value={editTenantData.newPassword}
+                  onChange={(e) => setEditTenantData({ ...editTenantData, newPassword: e.target.value })}
+                  placeholder="新密码（至少 6 位）"
+                  className="w-full px-3.5 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white"
+                />
+                <input
+                  type="text"
+                  value={editTenantData.confirmPassword}
+                  onChange={(e) => setEditTenantData({ ...editTenantData, confirmPassword: e.target.value })}
+                  placeholder="确认新密码"
+                  className="w-full px-3.5 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white"
+                />
+              </div>
+              <p className="text-[11px] text-slate-500">重置后请将新密码转告企业主，下次登录即使用新密码。</p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">初始授权坐席席位数</label>
+              <input
+                type="number"
+                min={1}
+                max={100}
+                value={editTenantData.maxSeats}
+                onChange={(e) => setEditTenantData({ ...editTenantData, maxSeats: Number(e.target.value) })}
+                className="w-full px-3.5 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                开通时限（服务到期日，留空 = 不限期）
+              </label>
+              <input
+                type="date"
+                value={editTenantData.expireAt}
+                onChange={(e) => setEditTenantData({ ...editTenantData, expireAt: e.target.value })}
+                className="w-full px-3.5 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white scheme-dark"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2.5 pt-3">
+              <button
+                type="button"
+                onClick={() => setEditingTenant(null)}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-300 transition"
+              >
+                取消
+              </button>
+              <button
+                type="submit"
+                className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white transition shadow-md shadow-blue-500/20"
+              >
+                保存修改
               </button>
             </div>
           </form>

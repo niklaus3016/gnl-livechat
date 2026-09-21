@@ -1,26 +1,21 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { loginAgent, getTenantConfig } from '../../api';
-import { TENANT_KEY } from '../../api/http';
-import { Headphones, Lock, Mail, ArrowRight } from 'lucide-react';
+import { loginAgent } from '../../api';
+import { getRememberedLogin, saveRememberedLogin, clearRememberedLogin } from '../../utils/remembered-login';
+import { Headphones, Lock, User, ArrowRight } from 'lucide-react';
 
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const from = (location.state as any)?.from || '/agent/conversations';
 
-  const [account, setAccount] = useState('agent01');
-  const [password, setPassword] = useState('admin123456');
+  // 默认空白：仅当坐席上次勾选「记住登录凭据」时才回填
+  const remembered = getRememberedLogin('agent');
+  const [account, setAccount] = useState(remembered?.account || '');
+  const [password, setPassword] = useState(remembered?.password || '');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  // Brand name driven by the same tenant_name field as the visitor widget header
-  const [tenantName, setTenantName] = useState('');
-
-  useEffect(() => {
-    getTenantConfig(TENANT_KEY)
-      .then((c) => setTenantName(c.tenant_name || ''))
-      .catch(() => undefined);
-  }, []);
+  const [rememberMe, setRememberMe] = useState(!!remembered);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,6 +24,12 @@ export const LoginPage: React.FC = () => {
 
     try {
       await loginAgent(account, password);
+      // 勾选「记住登录凭据」才落库，下次打开自动回填；不勾则清除旧记录
+      if (rememberMe) {
+        saveRememberedLogin('agent', { account: account.trim(), password });
+      } else {
+        clearRememberedLogin('agent');
+      }
       navigate(from, { replace: true });
     } catch (err: any) {
       setError(err.message || '登录失败，请检查账号密码');
@@ -45,10 +46,9 @@ export const LoginPage: React.FC = () => {
           <div className="inline-flex p-3 rounded-2xl bg-blue-600/20 border border-blue-500/30 text-blue-400 mb-3 shadow-lg shadow-blue-500/10">
             <Headphones className="w-8 h-8" />
           </div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">
-            {tenantName ? `${tenantName} · 坐席工作台` : '坐席工作台'}
+          <h1 className="text-4xl font-black tracking-tight text-transparent bg-clip-text bg-linear-to-r from-blue-400 via-indigo-300 to-purple-400">
+            在线客服坐席工作台
           </h1>
-          <p className="text-sm text-slate-400 mt-1">企业在线客服与接待中心</p>
         </div>
 
         {/* Login Box */}
@@ -69,13 +69,13 @@ export const LoginPage: React.FC = () => {
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1.5">坐席账号</label>
               <div className="relative">
-                <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
+                <User className="w-4 h-4 text-slate-400 absolute left-3 top-3.5" />
                 <input
                   type="text"
                   required
                   value={account}
                   onChange={(e) => setAccount(e.target.value)}
-                  placeholder="agent01"
+                  placeholder="请输入登录账号"
                   className="w-full pl-9 pr-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition"
                 />
               </div>
@@ -90,10 +90,22 @@ export const LoginPage: React.FC = () => {
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
+                  placeholder="请输入登录密码"
                   className="w-full pl-9 pr-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-hidden focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition"
                 />
               </div>
+            </div>
+
+            <div className="text-xs">
+              <label className="flex items-center gap-2 text-slate-500 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  className="w-3.5 h-3.5 accent-blue-600 rounded border-slate-300"
+                />
+                <span>记住登录凭据</span>
+              </label>
             </div>
 
             <button
@@ -116,7 +128,7 @@ export const LoginPage: React.FC = () => {
 
       {/* Copyright footer pinned near page bottom */}
       <div className="absolute bottom-9 left-0 right-0 text-center text-[11px] text-slate-500 select-none">
-        © 2026 光年跃迁（温州）科技有限公司 版权所有
+        © 2026 光年跃迁（温州）科技有限公司 版权所有｜在线客服系统
       </div>
     </div>
   );

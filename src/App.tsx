@@ -17,6 +17,7 @@ import { ConversationsPage } from './pages/agent/ConversationsPage';
 import { ConversationDetailPage } from './pages/agent/ConversationDetailPage';
 import { ProfilePage } from './pages/agent/settings/ProfilePage';
 import { QuickReplyPage } from './pages/agent/settings/QuickReplyPage';
+import { ChangePasswordPage } from './pages/agent/settings/ChangePasswordPage';
 import { TenantSettingsPage } from './pages/agent/settings/TenantSettingsPage';
 import { AgentsManagementPage } from './pages/agent/settings/AgentsManagementPage';
 import { AnalyticsReportPage } from './pages/agent/settings/AnalyticsReportPage';
@@ -103,6 +104,17 @@ export default function App() {
             <RouteGuard allowedRoles={['agent', 'tenant_admin']}>
               <AgentLayout>
                 <QuickReplyPage />
+              </AgentLayout>
+            </RouteGuard>
+          }
+        />
+
+        <Route
+          path="/agent/settings/password"
+          element={
+            <RouteGuard allowedRoles={['agent', 'tenant_admin']}>
+              <AgentLayout>
+                <ChangePasswordPage />
               </AgentLayout>
             </RouteGuard>
           }

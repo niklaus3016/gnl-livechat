@@ -64,7 +64,10 @@ export interface ChannelIntegrationConfig {
 
 export interface TenantConfig {
   tenant_code: string;
+  /** 超管创建时的注册名（法律/注册主体名），企业主不可改 */
   tenant_name: string;
+  /** 品牌展示名（企业主可改，访客端显示用）；未设置时 fallback 到 tenant_name */
+  brand_name?: string;
   theme_color: string;
   welcome_msg: string;
   default_avatar?: string;
@@ -94,6 +97,8 @@ export interface TenantItem {
   activeChatsCount: number;
   totalMessagesCount: number;
   adminEmail: string;
+  /** 企业主登录账号（超管创建时设定，不可修改；编辑弹窗只读展示） */
+  adminUsername?: string;
   createdAt: string;
   expireAt: string;
   /** 公司负责人（选填） */

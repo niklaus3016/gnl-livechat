@@ -6,7 +6,6 @@ import {
   Globe,
   MapPin,
   Clock,
-  ExternalLink,
   Mail,
   User,
   Phone,
@@ -51,14 +50,18 @@ export const VisitorInfoPanel: React.FC<VisitorInfoPanelProps> = ({
   const debounceTimerRef = useRef<number | null>(null);
   const statusResetTimerRef = useRef<number | null>(null);
 
-  // Sync state when switching conversations or when visitorInfo changes externally
+  // 仅在切换会话时同步本地状态。
+  // 注意：不要把 visitorInfo 放进依赖数组——父组件会因 socket 事件（新消息/typing/在线状态等）
+  // 频繁重渲染并产生新的 visitorInfo 引用，若依赖它会导致输入过程中被反复重置，
+  // 出现打字丢失、中文输入法乱码等问题。同一会话内以本地 state 为唯一真相。
   useEffect(() => {
     setName(visitorInfo.name || visitorName || '');
     setPhone(visitorInfo.phone || '');
     setEmail(visitorInfo.email || '');
     setNotes(visitorInfo.notes || '');
     setSaveStatus('idle');
-  }, [conversationId, visitorInfo, visitorName]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationId]);
 
   // Cleanup timers on unmount
   useEffect(() => {
@@ -282,7 +285,7 @@ export const VisitorInfoPanel: React.FC<VisitorInfoPanelProps> = ({
               </span>
             </div>
             <textarea
-              rows={3}
+              rows={5}
               value={notes}
               onChange={handleNotesChange}
               onBlur={handleBlur}
@@ -333,23 +336,8 @@ export const VisitorInfoPanel: React.FC<VisitorInfoPanelProps> = ({
               {channel === 'wechat' && '微信公众号 (WeChat Official)'}
               {channel === 'feishu' && '飞书开放平台 (Feishu OpenBot)'}
               {channel === 'dingtalk' && '阿里钉钉开放平台 (DingTalk)'}
-              {(!channel || channel === 'web') && 'Web 官网在线咨询窗口'}
+              {(!channel || channel === 'web') && 'Web 在线咨询窗口'}
             </div>
-          </div>
-
-          <div className={`p-2.5 rounded-xl ${dark ? 'bg-slate-800/60 border border-slate-700' : 'bg-white border border-slate-200/80 shadow-2xs'} space-y-1`}>
-            <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
-              <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
-              <span>来源页面 (Referer)</span>
-            </div>
-            <a
-              href={visitorInfo.referer}
-              target="_blank"
-              rel="noreferrer"
-              className={`${dark ? 'text-blue-400' : 'text-blue-600'} hover:underline break-all block text-[11px] font-medium`}
-            >
-              {visitorInfo.referer || '直接访问 / 嵌入代码'}
-            </a>
           </div>
 
           <div className={`flex items-center gap-2 p-2.5 rounded-xl ${dark ? 'bg-slate-800/60 border border-slate-700' : 'bg-white border border-slate-200/80 shadow-2xs'}`}>
