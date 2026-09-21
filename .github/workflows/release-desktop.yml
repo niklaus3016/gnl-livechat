@@ -66,7 +66,12 @@ jobs:
 
   build-macos:
     name: Build macOS dmg
-    runs-on: macos-14
+    # 固定 macos-13（Intel + Xcode 14）：
+    # dmg-license 的原生依赖 iconv-corefoundation 1.1.7 是老版 node-gyp addon，
+    # 在 macos-14 的 Xcode 15 上编译失败会被 npm 当作 optional 依赖静默跳过，
+    # 导致 electron-builder 启动即报 Cannot find module 'dmg-license'。
+    # x64 runner 交叉打 arm64 dmg 完全支持（iconutil/hdiutil 架构无关）。
+    runs-on: macos-13
     steps:
       - uses: actions/checkout@v4
 
@@ -77,6 +82,16 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # lockfile 在 Linux 上生成，darwin 专属可选依赖可能被 npm ci 漏掉，缺失时补装
+      - name: Ensure dmg-license is installed
+        run: |
+          if [ ! -d node_modules/dmg-license ]; then
+            echo "dmg-license missing after npm ci, installing explicitly..."
+            npm install dmg-license@1.0.11 --no-save
+          else
+            echo "dmg-license present"
+          fi
 
       - name: Build desktop bundle
         run: npm run build:desktop
