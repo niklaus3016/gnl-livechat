@@ -13,6 +13,8 @@ release/
 !/build/icon-win.png
 !/build/installerSidebar.bmp
 !/build/uninstallerSidebar.bmp
+!/build/installerHeader.bmp
+!/build/installer.nsh
 # 侧边栏图生成用字体（8MB，不入库）；下载：
 # https://github.com/google/fonts/raw/main/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf
 /build/fonts/

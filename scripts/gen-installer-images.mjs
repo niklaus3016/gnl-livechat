@@ -41,7 +41,8 @@ const BG_BOTTOM = '#312E81';
 /** @napi-rs/canvas 无 bmp 编码器，手写 24bit BMP（NSIS 经典 UI 标准要求） */
 function encodeBMP24(canvas) {
   const { width, height } = canvas;
-  const rgba = canvas.data;
+  // 注意：@napi-rs/canvas 的 canvas.data 是函数，必须调用或用 getImageData 取像素
+  const rgba = canvas.getContext('2d').getImageData(0, 0, width, height).data;
   const rowSize = Math.floor((24 * width + 31) / 32) * 4;
   const pixelBytes = rowSize * height;
   const fileSize = 14 + 40 + pixelBytes;
@@ -159,6 +160,40 @@ function drawSidebar(slogan) {
   return canvas;
 }
 
+/** 内页页眉：150×57 白底，右侧 logo，左侧深色产品名（所有内页顶部常驻品牌感） */
+function drawHeader() {
+  const HW = 150;
+  const HH = 57;
+  const canvas = createCanvas(HW, HH);
+  const ctx = canvas.getContext('2d');
+
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(0, 0, HW, HH);
+
+  // 右侧 logo（44×44，垂直居中）
+  const logoSize = 44;
+  ctx.drawImage(logo, HW - logoSize - 6, (HH - logoSize) / 2, logoSize, logoSize);
+
+  // 左侧产品名
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#1E2A6B';
+  ctx.font = `700 11px "${FONT_FAMILY}"`;
+  ctx.fillText('在线客服工作台', 8, 22);
+
+  ctx.fillStyle = '#64748B';
+  ctx.font = `500 6px "${FONT_FAMILY}"`;
+  ctx.fillText('GNL LIVECHAT', 9, 36);
+
+  // 青色点缀短线
+  ctx.fillStyle = '#22D3EE';
+  ctx.beginPath();
+  ctx.roundRect(8, HH - 7, 16, 2, 1);
+  ctx.fill();
+
+  return canvas;
+}
+
 const variants = [
   { name: 'installerSidebar.bmp', slogan: '让每一次沟通更高效' },
   { name: 'uninstallerSidebar.bmp', slogan: '感谢使用 · 期待再会' },
@@ -172,3 +207,9 @@ for (const v of variants) {
   fs.writeFileSync(path.join('/tmp', v.name.replace('.bmp', '.png')), canvas.toBuffer('image/png'));
   console.log('OK:', v.name, `${bmp.length} bytes`);
 }
+
+const header = drawHeader();
+const headerBmp = encodeBMP24(header);
+fs.writeFileSync(path.join(BUILD_DIR, 'installerHeader.bmp'), headerBmp);
+fs.writeFileSync('/tmp/installerHeader.png', header.toBuffer('image/png'));
+console.log('OK: installerHeader.bmp', `${headerBmp.length} bytes`);
