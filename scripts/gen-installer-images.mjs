@@ -132,9 +132,9 @@ function drawSidebar(slogan) {
   ctx.font = `700 13px "${FONT_FAMILY}"`;
   ctx.fillText('光年龙·超级客服', W / 2, 192);
 
-  // 6. slogan
-  ctx.fillStyle = 'rgba(226,232,240,0.72)';
-  ctx.font = `400 10px "${FONT_FAMILY}"`;
+  // 6. slogan（字号不能小于 11px，否则"一"等纯横笔画汉字在深底上会隐形）
+  ctx.fillStyle = 'rgba(226,232,240,0.85)';
+  ctx.font = `500 11px "${FONT_FAMILY}"`;
   ctx.fillText(slogan, W / 2, 214);
 
   // 7. 底部四色小点（呼应 logo 四色环）
@@ -170,25 +170,21 @@ function drawHeader() {
   ctx.fillStyle = '#FFFFFF';
   ctx.fillRect(0, 0, HW, HH);
 
-  // 右侧 logo（44×44，垂直居中）
-  const logoSize = 44;
-  ctx.drawImage(logo, HW - logoSize - 6, (HH - logoSize) / 2, logoSize, logoSize);
+  // 右侧 logo（46×46，垂直居中）
+  const logoSize = 46;
+  ctx.drawImage(logo, HW - logoSize - 5, (HH - logoSize) / 2, logoSize, logoSize);
 
-  // 左侧产品名
+  // 左侧产品名（页眉显示时会放大，取 11px 粗体保证清晰）
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = '#1E2A6B';
-  ctx.font = `700 10px "${FONT_FAMILY}"`;
-  ctx.fillText('光年龙·超级客服', 8, 22);
-
-  ctx.fillStyle = '#64748B';
-  ctx.font = `500 6px "${FONT_FAMILY}"`;
-  ctx.fillText('GNL LIVECHAT', 9, 36);
+  ctx.font = `700 11px "${FONT_FAMILY}"`;
+  ctx.fillText('光年龙·超级客服', 8, HH / 2 + 1);
 
   // 青色点缀短线
   ctx.fillStyle = '#22D3EE';
   ctx.beginPath();
-  ctx.roundRect(8, HH - 7, 16, 2, 1);
+  ctx.roundRect(8, HH - 8, 16, 2, 1);
   ctx.fill();
 
   return canvas;

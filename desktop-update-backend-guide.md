@@ -20,10 +20,10 @@
 ```
 desktop-updates/
 ├── latest.yml                                          # 当前最新版本清单（每次发版覆盖）
-├── GNL-LiveChat-Setup-0.1.5-x64.exe                    # 各历史版本安装包（建议保留）
-├── GNL-LiveChat-Setup-0.1.5-x64.exe.blockmap
-├── GNL-LiveChat-Setup-0.1.6-x64.exe
+├── GNL-LiveChat-Setup-0.1.6-x64.exe                    # 历史版本安装包（建议保留，供差量更新）
 ├── GNL-LiveChat-Setup-0.1.6-x64.exe.blockmap
+├── GNL-LiveChat-Setup-1.1.7-x64.exe                    # 当前版本
+├── GNL-LiveChat-Setup-1.1.7-x64.exe.blockmap
 └── ...
 ```
 
@@ -34,12 +34,12 @@ desktop-updates/
 该文件由打包工具自动生成，**不要手写、不要改内容**，直接原样上传即可。典型内容如下：
 
 ```yaml
-version: 0.1.5
+version: 1.1.7
 files:
-  - url: GNL-LiveChat-Setup-0.1.5-x64.exe
+  - url: GNL-LiveChat-Setup-1.1.7-x64.exe
     sha512: <自动生成的哈希，客户端下载后会校验，防篡改>
     size: 120543232
-path: GNL-LiveChat-Setup-0.1.5-x64.exe
+path: GNL-LiveChat-Setup-1.1.7-x64.exe
 sha512: <同上>
 releaseDate: '2026-09-26T10:00:00.000Z'
 ```
@@ -144,11 +144,11 @@ BASE=https://dzdqdodqktpq.sealoshzh.site/desktop-updates
 curl -I "$BASE/latest.yml"
 
 # 2. 安装包可下载（期望 200，响应头含 accept-ranges: bytes）
-curl -I "$BASE/GNL-LiveChat-Setup-0.1.5-x64.exe"
+curl -I "$BASE/GNL-LiveChat-Setup-1.1.7-x64.exe"
 
 # 3. Range 请求生效（期望 HTTP 206，Content-Range: bytes 0-1023/...）
 curl -H "Range: bytes=0-1023" -i \
-  "$BASE/GNL-LiveChat-Setup-0.1.5-x64.exe" -o /dev/null
+  "$BASE/GNL-LiveChat-Setup-1.1.7-x64.exe" -o /dev/null
 
 # 4. 清单内容正确（version 应为最新版本号，url 文件名实际存在）
 curl -s "$BASE/latest.yml"

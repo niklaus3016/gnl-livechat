@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { loginAgent } from '../../api';
 import { getRememberedLogin, saveRememberedLogin, clearRememberedLogin } from '../../utils/remembered-login';
-import { Headphones, Lock, User, ArrowRight } from 'lucide-react';
+import { Lock, User, ArrowRight } from 'lucide-react';
 
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
@@ -43,9 +43,11 @@ export const LoginPage: React.FC = () => {
       <div className="max-w-md w-full">
         {/* Brand Header */}
         <div className="text-center mb-8">
-          <div className="inline-flex p-3 rounded-2xl bg-blue-600/20 border border-blue-500/30 text-blue-400 mb-3 shadow-lg shadow-blue-500/10">
-            <Headphones className="w-8 h-8" />
-          </div>
+          <img
+            src="/brand-logo.png"
+            alt="光年龙·超级客服"
+            className="block w-20 h-20 mb-3 mx-auto drop-shadow-[0_8px_20px_rgba(0,0,0,0.45)]"
+          />
           <h1 className="text-4xl font-black tracking-tight text-transparent bg-clip-text bg-linear-to-r from-blue-400 via-indigo-300 to-purple-400">
             光年龙·超级客服
           </h1>

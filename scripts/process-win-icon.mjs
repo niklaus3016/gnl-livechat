@@ -19,8 +19,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 const SRC = path.join(ROOT, 'build', 'icon-win.png');
 
-/** 目标内容占画布比例（Chrome 等主流圆形图标约 88-92%） */
-const FILL_RATIO = 0.9;
+/** 目标内容占画布比例（实测 Chrome/豆包桌面图标内容占比约 95%） */
+const FILL_RATIO = 0.95;
 /** 包围盒外扩像素，保留抗锯齿边缘 */
 const BLEED = 2;
 const ALPHA_THRESHOLD = 16;
