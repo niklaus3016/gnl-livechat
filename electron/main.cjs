@@ -39,7 +39,7 @@ protocol.registerSchemesAsPrivileged([
 /** 打包后 __dirname 位于 app.asar/electron，开发时位于项目 electron/ */
 const DIST_DIR = path.join(__dirname, '..', 'dist-desktop');
 const PRELOAD = path.join(__dirname, 'preload.cjs');
-const ICON = path.join(__dirname, '..', 'build', 'icon.png');
+const ICON = path.join(__dirname, '..', 'build', 'icon-win.png');
 const STATE_FILE = path.join(app.getPath('userData'), 'window-state.json');
 
 const APP_HOST = 'desktop';

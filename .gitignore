@@ -9,7 +9,8 @@ dist-desktop/
 release/
 # electron-builder 资源目录，只入库应用图标
 /build/*
-!/build/icon.png
+!/build/icon-mac.png
+!/build/icon-win.png
 *.tsbuildinfo
 tsconfig.tsbuildinfo
 

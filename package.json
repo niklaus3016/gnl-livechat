@@ -15,8 +15,7 @@
     "lint": "tsc --noEmit",
     "electron:start": "npm run build:desktop && electron .",
     "dist:win": "npm run build:desktop && electron-builder --win --x64",
-    "dist:mac": "npm run build:desktop && electron-builder --mac --x64 --arm64",
-    "icon": "node scripts/generate-icon.cjs"
+    "dist:mac": "npm run build:desktop && electron-builder --mac --x64 --arm64"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.14",
@@ -54,7 +53,8 @@
     "files": [
       "electron/**/*",
       "dist-desktop/**/*",
-      "build/icon.png",
+      "build/icon-mac.png",
+      "build/icon-win.png",
       "package.json"
     ],
     "asar": true,
@@ -67,7 +67,7 @@
           ]
         }
       ],
-      "icon": "build/icon.png"
+      "icon": "build/icon-win.png"
     },
     "nsis": {
       "oneClick": false,
@@ -90,7 +90,7 @@
         }
       ],
       "category": "public.app-category.business",
-      "icon": "build/icon.png",
+      "icon": "build/icon-mac.png",
       "extendInfo": {
         "NSMicrophoneUsageDescription": "坐席需要使用麦克风录制并发送语音消息。"
       }
