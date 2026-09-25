@@ -7,10 +7,15 @@ node_modules/
 dist/
 dist-desktop/
 release/
-# electron-builder 资源目录，只入库应用图标
+# electron-builder 资源目录，只入库应用图标与安装器品牌图（BMP 为生成产物）
 /build/*
 !/build/icon-mac.png
 !/build/icon-win.png
+!/build/installerSidebar.bmp
+!/build/uninstallerSidebar.bmp
+# 侧边栏图生成用字体（8MB，不入库）；下载：
+# https://github.com/google/fonts/raw/main/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf
+/build/fonts/
 *.tsbuildinfo
 tsconfig.tsbuildinfo
 
