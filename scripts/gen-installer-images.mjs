@@ -129,8 +129,8 @@ function drawSidebar(slogan) {
   ctx.fillStyle = '#FFFFFF';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.font = `700 14px "${FONT_FAMILY}"`;
-  ctx.fillText('在线客服工作台', W / 2, 192);
+  ctx.font = `700 13px "${FONT_FAMILY}"`;
+  ctx.fillText('光年龙·超级客服', W / 2, 192);
 
   // 6. slogan
   ctx.fillStyle = 'rgba(226,232,240,0.72)';
@@ -178,8 +178,8 @@ function drawHeader() {
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = '#1E2A6B';
-  ctx.font = `700 11px "${FONT_FAMILY}"`;
-  ctx.fillText('在线客服工作台', 8, 22);
+  ctx.font = `700 10px "${FONT_FAMILY}"`;
+  ctx.fillText('光年龙·超级客服', 8, 22);
 
   ctx.fillStyle = '#64748B';
   ctx.font = `500 6px "${FONT_FAMILY}"`;

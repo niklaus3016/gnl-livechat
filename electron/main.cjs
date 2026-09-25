@@ -1,5 +1,5 @@
 /**
- * 在线客服工作台 · Electron 桌面客户端主进程
+ * 光年龙·超级客服 · Electron 桌面客户端主进程
  *
  * 设计要点：
  * 1. 通过自定义特权协议 app:// 加载本地构建产物（dist-desktop），
@@ -18,9 +18,17 @@ const {
   session,
   protocol,
   ipcMain,
+  dialog,
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
+
+/**
+ * 自动更新源（generic provider）：
+ * 服务器该路径下需放置 latest.yml + 安装包 exe + blockmap。
+ * macOS 待签名/公证就绪后再开启（未签名应用静默替换后过不了 Gatekeeper）。
+ */
+const UPDATE_FEED_URL = 'https://dzdqdodqktpq.sealoshzh.site/desktop-updates/';
 
 // 必须在 app ready 之前注册
 protocol.registerSchemesAsPrivileged([
@@ -214,6 +222,16 @@ function buildMenu() {
         { role: 'close', label: '关闭窗口' },
       ],
     },
+    {
+      label: '帮助',
+      submenu: [
+        {
+          label: '检查更新',
+          enabled: app.isPackaged && process.platform === 'win32',
+          click: () => checkForUpdates(true),
+        },
+      ],
+    },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
@@ -229,7 +247,7 @@ function createWindow() {
     minWidth: MIN_SIZE.width,
     minHeight: MIN_SIZE.height,
     show: false,
-    title: '在线客服工作台',
+    title: '光年龙·超级客服',
     backgroundColor: '#f1f5f9',
     icon: fs.existsSync(ICON) ? ICON : undefined,
     autoHideMenuBar: process.platform === 'win32',
@@ -272,6 +290,106 @@ function createWindow() {
   });
 }
 
+/* ---------------- 自动更新（electron-updater） ---------------- */
+
+/** @type {import('electron-updater').AppUpdater | null} */
+let autoUpdater = null;
+/** 手动触发的检查（菜单）在无更新时弹"已是最新"；启动静默检查不弹 */
+let manualUpdateCheck = false;
+
+function setupAutoUpdater() {
+  // 仅打包后的 Windows 客户端启用；开发环境与 macOS（待签名公证）跳过
+  if (!app.isPackaged || process.platform !== 'win32') return;
+
+  const updater = require('electron-updater').autoUpdater;
+  updater.autoDownload = false;
+  updater.setFeedURL({ provider: 'generic', url: UPDATE_FEED_URL });
+
+  updater.on('update-available', (info) => {
+    dialog
+      .showMessageBox(mainWindow, {
+        type: 'info',
+        title: '发现新版本',
+        message: `发现新版本 v${info.version}`,
+        detail: `当前版本 v${app.getVersion()}
+
+点击「立即下载更新」将在后台下载，完成后提醒您重启安装；也可稍后通过「帮助 → 检查更新」再次升级。`,
+        buttons: ['立即下载更新', '稍后提醒'],
+        defaultId: 0,
+        cancelId: 1,
+        noLink: true,
+      })
+      .then(({ response }) => {
+        if (response === 0) {
+          updater.downloadUpdate().catch((e) => {
+            console.error('[updater] download failed:', e);
+            dialog.showErrorBox('更新下载失败', String(e?.message || e));
+          });
+        }
+      });
+  });
+
+  updater.on('update-not-available', () => {
+    if (manualUpdateCheck) {
+      dialog.showMessageBox(mainWindow, {
+        type: 'info',
+        title: '检查更新',
+        message: '当前已是最新版本',
+        detail: `v${app.getVersion()}`,
+        buttons: ['确定'],
+        noLink: true,
+      });
+    }
+    manualUpdateCheck = false;
+  });
+
+  updater.on('download-progress', (p) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.setProgressBar(Math.max(0, Math.min(1, p.percent / 100)));
+    }
+  });
+
+  updater.on('update-downloaded', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setProgressBar(-1);
+    dialog
+      .showMessageBox(mainWindow, {
+        type: 'info',
+        title: '更新已就绪',
+        message: '新版本下载完成',
+        detail: '重启应用后将自动完成安装（未发送的草稿请先处理）。',
+        buttons: ['立即重启并安装', '下次启动时安装'],
+        defaultId: 0,
+        cancelId: 1,
+        noLink: true,
+      })
+      .then(({ response }) => {
+        if (response === 0) updater.quitAndInstall();
+        // 选"下次启动时安装"：autoInstallOnAppQuit 默认 true，退出后自动装好
+      });
+  });
+
+  updater.on('error', (err) => {
+    console.error('[updater] error:', err);
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setProgressBar(-1);
+    manualUpdateCheck = false;
+  });
+
+  autoUpdater = updater;
+}
+
+/** @param {boolean} manual 是否用户手动检查 */
+function checkForUpdates(manual = false) {
+  if (!autoUpdater) return;
+  manualUpdateCheck = manual;
+  autoUpdater.checkForUpdates().catch((e) => {
+    console.error('[updater] check failed:', e);
+    manualUpdateCheck = false;
+    if (manual) {
+      dialog.showErrorBox('检查更新失败', String(e?.message || e));
+    }
+  });
+}
+
 // 单实例锁
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
@@ -289,6 +407,9 @@ if (!gotLock) {
     configureSession();
     buildMenu();
     createWindow();
+    setupAutoUpdater();
+    // 启动后延迟静默检查，避免与窗口加载争网络
+    setTimeout(() => checkForUpdates(false), 3500);
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();

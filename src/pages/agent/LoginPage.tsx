@@ -47,7 +47,7 @@ export const LoginPage: React.FC = () => {
             <Headphones className="w-8 h-8" />
           </div>
           <h1 className="text-4xl font-black tracking-tight text-transparent bg-clip-text bg-linear-to-r from-blue-400 via-indigo-300 to-purple-400">
-            在线客服坐席工作台
+            光年龙·超级客服
           </h1>
         </div>
 
